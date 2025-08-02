@@ -1,7 +1,7 @@
-package com.quma.quma_shopify_backend.Services;
+package com.quma.quma_shopify_backend.services;
 
-import com.quma.quma_shopify_backend.Models.ProductModel;
-import com.quma.quma_shopify_backend.Repositories.HomeRepository;
+import com.quma.quma_shopify_backend.models.mongo.ProductModel;
+import com.quma.quma_shopify_backend.repositories.HomeRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 

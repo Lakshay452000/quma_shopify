@@ -1,4 +1,4 @@
-package com.quma.quma_shopify_backend.Models;
+package com.quma.quma_shopify_backend.models.mongo;
 
 import lombok.Data;
 import org.springframework.data.annotation.Id;
