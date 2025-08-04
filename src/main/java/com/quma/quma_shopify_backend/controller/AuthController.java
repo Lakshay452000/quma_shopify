@@ -11,6 +11,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 // AuthController.java
 /*
 IMPORTANT: No jwt authentication is required for these endpoints.
@@ -53,5 +55,10 @@ public class AuthController {
     public ResponseEntity<String> verifyOtp(@RequestBody OtpDTO otpDTO) {
         otpService.verifyOtp(otpDTO);
         return ResponseEntity.ok("OTP verified");
+    }
+
+    @GetMapping("/cdn-upload-auth")
+    public ResponseEntity<Map<String, Object>> getCdnUploadAuthSignature() throws Exception {
+        return ResponseEntity.ok(authService.getCdnUploadAuthSignature());
     }
 }

@@ -10,18 +10,26 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
 @Service
 public class AuthService {
 
-    @Value("${frontend.redirect.home-url}")
-    private String frontendRedirectUrl;
+    @Value("${imagekit.privateKey}")
+    private String privateKey;
 
     @Autowired
     private JwtUtil jwtUtil;
 
     @Autowired
     private ITokenStore tokenStore;
-
 
     private static void setAccessAndRefreshCookie(HttpServletResponse response, String accessToken, String refreshToken) {
         // Setting access token cookie
@@ -91,5 +99,35 @@ public class AuthService {
     public boolean authStatus(HttpServletRequest request) {
         String token = CookieUtil.getCookieValue(request, Constants.COOKIE_ACCESS_TOKEN_KEY_NAME);
         return token != null && jwtUtil.isValid(token);
+    }
+
+    public Map<String, Object> getCdnUploadAuthSignature() {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            String token = UUID.randomUUID().toString();
+            long expire = (System.currentTimeMillis() / 1000) + 3600; // 3600 seconds = 1 hour
+            String dataToSign = token + expire;
+            String signature = generateHmacSha1(dataToSign, privateKey);
+            response.put("token", token);
+            response.put("expire", expire);
+            response.put("signature", signature);
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            System.err.println("Error generating signature: " + e.getMessage());
+            response.put("error", "Failed to generate authentication parameters.");
+        }
+        return response;
+    }
+
+    private String generateHmacSha1(String data, String key)
+            throws NoSuchAlgorithmException, InvalidKeyException {
+        Mac mac = Mac.getInstance("HmacSHA1");
+        SecretKeySpec secretKeySpec = new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA1");
+        mac.init(secretKeySpec);
+        byte[] hmacSha1Bytes = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+        StringBuilder hexString = new StringBuilder();
+        for (byte b : hmacSha1Bytes) {
+            hexString.append(String.format("%02x", b));
+        }
+        return hexString.toString();
     }
 }
