@@ -1,6 +1,6 @@
 package com.quma.quma_shopify_backend.services;
 
-import com.quma.quma_shopify_backend.interfaces.ITokenStore;
+import com.quma.quma_shopify_backend.interfaces.IStore;
 import com.quma.quma_shopify_backend.security.JwtUtil;
 import com.quma.quma_shopify_backend.utilities.Constants;
 import com.quma.quma_shopify_backend.utilities.CookieUtil;
@@ -29,7 +29,7 @@ public class AuthService {
     private JwtUtil jwtUtil;
 
     @Autowired
-    private ITokenStore tokenStore;
+    private IStore tokenStore;
 
     private static void setAccessAndRefreshCookie(HttpServletResponse response, String accessToken, String refreshToken) {
         // Setting access token cookie

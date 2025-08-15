@@ -1,4 +1,4 @@
-package com.quma.quma_shopify_backend.models.dtos;
+package com.quma.quma_shopify_backend.models.redis;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

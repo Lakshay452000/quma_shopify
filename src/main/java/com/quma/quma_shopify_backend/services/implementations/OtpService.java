@@ -3,10 +3,9 @@ package com.quma.quma_shopify_backend.services.implementations;
 import com.quma.quma_shopify_backend.enums.OtpPurpose;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.interfaces.IOtpService;
-import com.quma.quma_shopify_backend.interfaces.ITokenStore;
+import com.quma.quma_shopify_backend.interfaces.IStore;
 import com.quma.quma_shopify_backend.models.dtos.OtpDTO;
-import com.quma.quma_shopify_backend.models.dtos.OtpRedisModel;
-import com.quma.quma_shopify_backend.utilities.Constants;
+import com.quma.quma_shopify_backend.models.redis.OtpRedisModel;
 import com.quma.quma_shopify_backend.validators.OtpRequestValidator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,9 +22,12 @@ public class OtpService implements IOtpService {
     @Autowired
     RedisStore redisStore;
     @Autowired
-    ITokenStore iTokenStore;
+    IStore iStore;
     @Autowired
     OtpRequestValidator otpRequestValidator;
+
+    public static final String REDIS_OTP_KEY_PREFIX = "otp_";
+    public static final String REDIS_RESET_PASSWORD_KEY_PREFIX = "reset_password_";
 
     @Override
     public void ensureOtpVerified(String phone, OtpPurpose otpPurpose) {
@@ -42,8 +44,8 @@ public class OtpService implements IOtpService {
 
     private static String getRedisPrefixKey(String phone, OtpPurpose otpPurpose) {
         return switch (otpPurpose) {
-            case REGISTRATION -> Constants.REDIS_OTP_KEY_PREFIX + phone;
-            case PASSWORD_RESET -> Constants.REDIS_RESET_PASSWORD_KEY_PREFIX + phone;
+            case REGISTRATION -> REDIS_OTP_KEY_PREFIX + phone;
+            case PASSWORD_RESET -> REDIS_RESET_PASSWORD_KEY_PREFIX + phone;
         };
     }
 
@@ -55,7 +57,7 @@ public class OtpService implements IOtpService {
 //        whatsAppService.sendOtp(phone, otp);
         OtpRedisModel otpRedisModel = new OtpRedisModel(phone, otp, false);
         String redisPrefixKey = getRedisPrefixKey(phone, otpDTO.getOtpPurpose());
-        iTokenStore.save(redisPrefixKey, otpRedisModel, Duration.ofHours(1));
+        iStore.save(redisPrefixKey, otpRedisModel, Duration.ofHours(1));
     }
 
     @Override

@@ -27,7 +27,7 @@ public class AuthController {
     private OtpService otpService;
 
 
-    @PostMapping("/new-refresh-token")
+    @GetMapping("/new-refresh-token")
     public ResponseEntity<String> refresh(HttpServletRequest request, HttpServletResponse response) {
         boolean refreshed = authService.refreshToken(request, response);
         if (!refreshed) {
