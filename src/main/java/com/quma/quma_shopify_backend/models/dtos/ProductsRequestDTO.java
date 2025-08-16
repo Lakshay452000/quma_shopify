@@ -1,19 +1,22 @@
 package com.quma.quma_shopify_backend.models.dtos;
 
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 import com.quma.quma_shopify_backend.enums.SortType;
-import lombok.AllArgsConstructor;
 import lombok.Data;
 
 import java.util.List;
 import java.util.Map;
 
 @Data
-@AllArgsConstructor
 public class ProductsRequestDTO {
     private List<String> productIds;
     private Map<String, Object> productFilters;
+    @JsonSetter(nulls = Nulls.SKIP)
     private int pageSize = 20; // Default page size
-    private String lastProductId; // For pagination
-    private String sortBy; // Field to sort by, e.g., "price", "rating
-    private SortType sortType; // "asc" or "desc"
+    private Object[] lastSortValues;
+    @JsonSetter(nulls = Nulls.SKIP)
+    private String sortBy = "createdAt";
+    @JsonSetter(nulls = Nulls.SKIP)
+    private SortType sortType = SortType.DESC; // "asc" or "desc"
 }

@@ -2,9 +2,9 @@ package com.quma.quma_shopify_backend.services;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quma.quma_shopify_backend.enums.SortType;
+import com.quma.quma_shopify_backend.models.dtos.ProductsRequestDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
 import com.quma.quma_shopify_backend.utilities.Constants;
-import io.micrometer.common.util.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
@@ -13,8 +13,6 @@ import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.index.query.BoolQueryBuilder;
-import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.sort.SortOrder;
@@ -22,9 +20,9 @@ import org.elasticsearch.xcontent.XContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 @Service
 @Slf4j
@@ -59,41 +57,34 @@ public class ElasticSearchService {
         }
     }
 
-    public List<ProductElasticDocument> searchProducts(Map<String, Object> filters,
-                                                       int pageSize, String lastProductId,
-                                                       String sortBy, SortType sortType) throws Exception {
-        try {
-            SearchRequest searchRequest = new SearchRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME);
+    public List<ProductElasticDocument> searchProducts(ProductsRequestDTO request) throws IOException {
 
-            BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
-            for (Map.Entry<String, Object> entry : filters.entrySet()) {
-                Object value = entry.getValue();
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
+                .size(request.getPageSize())
+                .sort(request.getSortBy(),
+                        SortType.DESC.equals(request.getSortType()) ? SortOrder.DESC : SortOrder.ASC)
+                .sort("_id", SortType.DESC.equals(request.getSortType()) ? SortOrder.DESC : SortOrder.ASC);
 
-                if (value instanceof Number || value instanceof Boolean) {
-                    boolQuery.must(QueryBuilders.termQuery(entry.getKey(), value));
-                } else {
-                    boolQuery.must(QueryBuilders.matchQuery(entry.getKey(), value.toString()));
-                }
-            }
-            SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
-                    .query(boolQuery)
-                    .size(pageSize)
-                    .sort(sortBy, SortType.DESC.equals(sortType) ? SortOrder.DESC : SortOrder.ASC);
-
-            // Add search_after only if it's not the first page
-            if (StringUtils.isNotBlank(lastProductId)) {
-                searchSourceBuilder.searchAfter(new Object[]{lastProductId});
-            }
-            searchRequest.source(searchSourceBuilder);
-            SearchResponse searchResponse = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
-            List<ProductElasticDocument> results = new ArrayList<>();
-            for (SearchHit hit : searchResponse.getHits().getHits()) {
-                results.add(objectMapper.readValue(hit.getSourceAsString(), ProductElasticDocument.class));
-            }
-            return results;
-        } catch (Exception e) {
-            log.error("Error searching products in Elastic with search_after {}", e.getMessage());
-            throw e;
+        if (request.getLastSortValues() != null &&
+                request.getLastSortValues().length == 2) { // must match number of sort fields
+            searchSourceBuilder.searchAfter(request.getLastSortValues());
         }
+
+        SearchRequest searchRequest = new SearchRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME)
+                .source(searchSourceBuilder);
+
+        SearchResponse searchResponse = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+
+        List<ProductElasticDocument> products = new ArrayList<>();
+        for (SearchHit hit : searchResponse.getHits().getHits()) {
+            ProductElasticDocument product = objectMapper.convertValue(hit.getSourceAsMap(), ProductElasticDocument.class);
+            product.setId(hit.getId());
+            // Store sort values so frontend can send them back
+            product.setSortValues(hit.getSortValues());
+            products.add(product);
+        }
+
+        return products;
     }
+
 }
