@@ -9,6 +9,10 @@ import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
 
+import com.quma.quma_shopify_backend.models.mongo.Variant;
+
+import jakarta.validation.constraints.NotBlank;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -35,16 +39,13 @@ public class ProductElasticDocument {
     private String description;
 
     @Field(type = FieldType.Double)
-    private BigDecimal price;
-
-    @Field(type = FieldType.Double)
     private BigDecimal discountedPrice;
 
     @Field(type = FieldType.Keyword)
     private List<String> tags;
 
     @Field(type = FieldType.Keyword)
-    private String imageUrl; // One main product image
+    private List<String> images; // One main product image
 
     // Review summary
     @Field(type = FieldType.Double)
@@ -60,6 +61,8 @@ public class ProductElasticDocument {
     private Instant updatedAt;
     @Transient
     private Object[] sortValues;
+    @NotBlank
+    private List<Variant> variants; // Different sizes, colors, weight
 
 }
 

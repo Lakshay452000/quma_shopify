@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.models.dtos.ProductsRequestDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
+import com.quma.quma_shopify_backend.models.elastic.ProductElasticResponseDocument;
 import com.quma.quma_shopify_backend.models.mongo.Product;
 import com.quma.quma_shopify_backend.repositories.mongo.ProductRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +12,7 @@ import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.List;
 
 @Service
@@ -25,39 +27,15 @@ public class ProductService {
     @Autowired
     private ObjectMapper objectMapper;
 
-    private List<ProductElasticDocument> getProductElasticDocuments(Product product) {
-        return product.getVariants().stream()
-                .map(variant -> {
-                    ProductElasticDocument doc = new ProductElasticDocument();
-                    doc.setId(product.getId() + "_" + variant.getIdentifier()); // Unique per variant
-                    doc.setOwnerId(product.getOwnerId());
-                    doc.setTitle(product.getTitle());
-                    doc.setCategoryId(product.getCategoryId());
-                    doc.setDescription(product.getDescription());
-                    doc.setPrice(variant.getPrice());
-                    doc.setDiscountedPrice(variant.getDiscountedPrice());
-                    doc.setTags(product.getTags());
-                    // Choose image — prefer variant-specific if available
-                    if (product.getImages() != null && !product.getImages().isEmpty()) {
-                        doc.setImageUrl(product.getImages().get(0));
-                    } else {
-                        doc.setImageUrl(null);
-                    }
-                    doc.setAverageRating(product.getAverageRating());
-                    doc.setTotalReviews(product.getTotalReviews() != null ? product.getTotalReviews().intValue() : null);
-                    doc.setCreatedAt(product.getCreatedAt());
-                    doc.setUpdatedAt(product.getUpdatedAt());
-
-                    return doc;
-                })
-                .toList();
+    private ProductElasticDocument getProductElasticDocuments(Product product) {
+        return objectMapper.convertValue(product, ProductElasticDocument.class);
     }
 
     public void saveProduct(Product product) {
         try {
             Product savedProduct = productRepository.save(product);
-            List<ProductElasticDocument> productElasticDocuments = getProductElasticDocuments(savedProduct);
-            elasticSearchService.indexProducts(productElasticDocuments);
+            ProductElasticDocument productElasticDocuments = getProductElasticDocuments(savedProduct);
+            elasticSearchService.indexProducts(Collections.singletonList(productElasticDocuments));
 
         } catch (Exception e) {
             log.error("Failed to save product: {}", e.getMessage());
@@ -65,8 +43,12 @@ public class ProductService {
         }
     }
 
-    public List<ProductElasticDocument> searchProducts(ProductsRequestDTO productsRequestDTO) throws Exception {
+    public ProductElasticResponseDocument searchProducts(ProductsRequestDTO productsRequestDTO) throws Exception {
         return elasticSearchService.searchProducts(productsRequestDTO);
+    }
+
+    public List<ProductElasticDocument> searchProductsByIds(List<String> productIds) throws Exception {
+        return elasticSearchService.getProductsByIds(productIds);
     }
 
     public List<Product> getProductList(List<String> productIds) {

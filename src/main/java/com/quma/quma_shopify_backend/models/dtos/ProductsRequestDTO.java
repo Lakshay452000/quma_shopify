@@ -14,7 +14,7 @@ public class ProductsRequestDTO {
     private Map<String, Object> productFilters;
     @JsonSetter(nulls = Nulls.SKIP)
     private int pageSize = 20; // Default page size
-    private Object[] lastSortValues;
+    private Object[] sortValues;
     @JsonSetter(nulls = Nulls.SKIP)
     private String sortBy = "createdAt";
     @JsonSetter(nulls = Nulls.SKIP)
