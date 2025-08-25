@@ -32,8 +32,14 @@ public class ProductElasticDocument {
     @Field(type = FieldType.Text)
     private String title;
 
-    @Field(type = FieldType.Integer)
-    private String categoryId; // Category ID for filtering
+    @Field(type = FieldType.Keyword)
+    private String category;
+
+    @Field(type = FieldType.Keyword)
+    private String type;
+
+    @Field(type = FieldType.Keyword)
+    private String brand;
 
     @Field(type = FieldType.Text)
     private String description;
@@ -41,7 +47,7 @@ public class ProductElasticDocument {
     @Field(type = FieldType.Double)
     private BigDecimal discountedPrice;
 
-    @Field(type = FieldType.Keyword)
+    @Field(type = FieldType.Text)
     private List<String> tags;
 
     @Field(type = FieldType.Keyword)
@@ -59,10 +65,13 @@ public class ProductElasticDocument {
 
     @Field(type = FieldType.Date)
     private Instant updatedAt;
+
     @Transient
     private Object[] sortValues;
+
     @NotBlank
-    private List<Variant> variants; // Different sizes, colors, weight
+    private List<Variant> variants;
 
+    @Field(type = FieldType.Boolean)
+    private Boolean isActive;
 }
-

@@ -23,7 +23,13 @@ public class Product {
     private String description;
 
     @NotBlank
-    private String categoryId;
+    private String brand;
+
+    @NotBlank
+    private String category;
+
+    @NotBlank
+    private String type;
 
     private List<String> tags;
 

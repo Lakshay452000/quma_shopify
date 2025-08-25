@@ -2,12 +2,10 @@ package com.quma.quma_shopify_backend.controller;
 
 import com.quma.quma_shopify_backend.models.dtos.ProductsRequestDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
-import com.quma.quma_shopify_backend.models.elastic.ProductElasticResponseDocument;
 import com.quma.quma_shopify_backend.models.mongo.Product;
 import com.quma.quma_shopify_backend.services.ProductService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -39,11 +37,6 @@ public class ProductController {
         } catch (Exception e) {
             return ResponseEntity.status(500).body("Internal server error while fetching products list");
         }
-    }
-
-    @PostMapping("/search")
-    public ResponseEntity<ProductElasticResponseDocument> searchProducts(@RequestBody ProductsRequestDTO productsRequestDTO) throws Exception {
-        return ResponseEntity.ok(productService.searchProducts(productsRequestDTO));
     }
 
     @PostMapping("/search/batch")

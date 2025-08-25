@@ -32,9 +32,6 @@ public class UserService implements IUserService {
     @Autowired
     AuthService authService;
 
-    @Autowired
-    private HttpServletResponse httpServletResponse;
-
     @Override
     public void registerUser(UserRequestDTO userRequestDTO, HttpServletResponse httpServletResponse) {
         userValidator.validateUserRequest(userRequestDTO);
@@ -53,8 +50,7 @@ public class UserService implements IUserService {
     public void login(UserRequestDTO userRequestDTO, HttpServletResponse httpServletResponse) {
         userValidator.validateUserRequest(userRequestDTO);
         User user = userInfoRepository.findByPhone(userRequestDTO.getPhone()).orElseThrow(
-                () -> new ApiException("Invalid phone number or password", 404)
-        );
+                () -> new ApiException("Invalid phone number or password", 404));
         if (!EncryptionUtil.bcryptMatches(userRequestDTO.getPassword(), user.getPassword())) {
             throw new ApiException("Invalid phone number or password", 404);
         }

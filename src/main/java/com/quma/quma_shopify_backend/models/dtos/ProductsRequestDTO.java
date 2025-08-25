@@ -19,4 +19,5 @@ public class ProductsRequestDTO {
     private String sortBy = "createdAt";
     @JsonSetter(nulls = Nulls.SKIP)
     private SortType sortType = SortType.DESC; // "asc" or "desc"
+    private String searchTerm;
 }

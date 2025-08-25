@@ -2,13 +2,18 @@ package com.quma.quma_shopify_backend.services;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quma.quma_shopify_backend.enums.SortType;
+import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.models.dtos.ProductsRequestDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticResponseDocument;
+import com.quma.quma_shopify_backend.services.implementations.RedisStore;
 import com.quma.quma_shopify_backend.utilities.Constants;
+import com.quma.quma_shopify_backend.utilities.ElasticProductFilters;
+
+import org.elasticsearch.search.aggregations.AggregationBuilders;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
-import org.apache.commons.collections4.MapUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.get.MultiGetItemResponse;
@@ -19,21 +24,25 @@ import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.index.query.BoolQueryBuilder;
-import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.aggregations.bucket.nested.Nested;
+import org.elasticsearch.search.aggregations.bucket.nested.NestedAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.nested.ParsedNested;
+import org.elasticsearch.search.aggregations.bucket.terms.ParsedTerms;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.sort.SortOrder;
 import org.elasticsearch.xcontent.XContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.elasticsearch.index.query.*;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @Slf4j
@@ -45,6 +54,9 @@ public class ElasticSearchService {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private RedisStore redisStore;
 
     public void indexProducts(List<ProductElasticDocument> products) throws Exception {
         try {
@@ -92,43 +104,198 @@ public class ElasticSearchService {
         return products;
     }
 
-    public ProductElasticResponseDocument searchProducts(ProductsRequestDTO request) throws IOException {
+    public ProductElasticResponseDocument searchProducts(ProductsRequestDTO request) throws ApiException, IOException {
+        try {
+            String normalized = normalizeQuery(request.getSearchTerm());
 
-        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
-                .size(request.getPageSize())
-                .sort(request.getSortBy(),
-                        SortType.DESC.equals(request.getSortType()) ? SortOrder.DESC : SortOrder.ASC)
-                .sort("_id", SortType.DESC.equals(request.getSortType()) ? SortOrder.DESC : SortOrder.ASC);
-        // Apply filters if provided
-        if (MapUtils.isNotEmpty(request.getProductFilters())) {
-            BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
-            for (Map.Entry<String, Object> entry : request.getProductFilters().entrySet()) {
-                // Use termQuery for exact match
-                boolQuery.must(QueryBuilders.termQuery(entry.getKey(), entry.getValue()));
+            // Base query
+            BoolQueryBuilder bool = QueryBuilders.boolQuery()
+                    .filter(QueryBuilders.termQuery("isActive", true));
+
+            if (StringUtils.isNotBlank(normalized)) {
+                bool.must(QueryBuilders.multiMatchQuery(normalized,
+                        "title", "description", "category", "brand", "tags",
+                        "title.ngram", "description.ngram", "tags.ngram")
+                        .type(MultiMatchQueryBuilder.Type.BEST_FIELDS)
+                        .fuzziness(Fuzziness.AUTO));
             }
-            searchSourceBuilder.query(boolQuery);
-        }
-        if (request.getSortValues() != null &&
-                request.getSortValues().length == 2) { // must match number of sort fields
-            searchSourceBuilder.searchAfter(request.getSortValues());
-        }
 
-        SearchRequest searchRequest = new SearchRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME)
-                .source(searchSourceBuilder);
+            // Build search source
+            SearchSourceBuilder ssb = new SearchSourceBuilder()
+                    .query(bool)
+                    .size(request.getPageSize())
+                    .sort("_score", SortOrder.DESC)
+                    .sort(StringUtils.defaultIfBlank(request.getSortBy(), "updatedAt"),
+                            request.getSortType() == SortType.ASC ? SortOrder.ASC : SortOrder.DESC)
+                    .sort("_id", SortOrder.ASC);
 
-        SearchResponse searchResponse = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+            if (request.getSortValues() != null && request.getSortValues().length > 0) {
+                ssb.searchAfter(request.getSortValues());
+            }
 
-        List<ProductElasticDocument> products = new ArrayList<>();
-        Object[] lastSortValues = null;
-        for (SearchHit hit : searchResponse.getHits().getHits()) {
-                ProductElasticDocument product = objectMapper.convertValue(hit.getSourceAsMap(), ProductElasticDocument.class);
-                product.setId(hit.getId());
+            boolean isFirstPage = (request.getSortValues() == null || request.getSortValues().length == 0);
+
+            // Aggregations for first page
+            if (isFirstPage) {
+                // Nested variants
+                NestedAggregationBuilder variantsNestedAgg = AggregationBuilders.nested("variants_nested", "variants")
+                        .subAggregation(AggregationBuilders.terms("color_agg")
+                                .field("variants.color")
+                                .size(100)
+                                .missing("N/A"))
+                        .subAggregation(AggregationBuilders.terms("size_agg")
+                                .field("variants.size")
+                                .size(100)
+                                .missing("N/A"))
+                        .subAggregation(AggregationBuilders.terms("material_agg")
+                                .field("variants.material")
+                                .size(100)
+                                .missing("N/A"));
+                ssb.aggregation(variantsNestedAgg);
+
+                // Top-level
+                for (String field : ElasticProductFilters.getTopLevelFilters()) {
+                    ssb.aggregation(AggregationBuilders.terms(field + "_agg")
+                            .field(field)
+                            .size(100)
+                            .missing("N/A"));
+                }
+            }
+
+            // Execute search
+            SearchRequest searchRequest = new SearchRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME).source(ssb);
+            SearchResponse resp = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+
+            // Parse hits
+            List<ProductElasticDocument> products = new ArrayList<>();
+            Object[] lastSortValues = null;
+            for (SearchHit hit : resp.getHits().getHits()) {
+                ProductElasticDocument p = objectMapper.convertValue(hit.getSourceAsMap(),
+                        ProductElasticDocument.class);
+                p.setId(hit.getId());
                 lastSortValues = hit.getSortValues();
-                products.add(product);
+                products.add(p);
+            }
+
+            ProductElasticResponseDocument out = new ProductElasticResponseDocument();
+            out.setProducts(products);
+            out.setSortValues(lastSortValues);
+
+            // Parse aggregations for first page
+            if (isFirstPage) {
+                Map<String, Set<String>> filtersSet = new HashMap<>();
+
+                // Top-level fields
+                for (String field : ElasticProductFilters.getTopLevelFilters()) {
+                    Set<String> values = new HashSet<>();
+                    Terms agg = resp.getAggregations().get(field + "_agg");
+                    if (agg != null) {
+                        agg.getBuckets().forEach(bucket -> {
+                            String key = bucket.getKeyAsString();
+                            if (key != null && !key.isEmpty() && !"N/A".equalsIgnoreCase(key))
+                                values.add(key);
+                        });
+                    }
+                    filtersSet.put(field, values);
+                }
+
+                // Nested variant fields
+                Nested variantsNested = resp.getAggregations().get("variants_nested");
+                if (variantsNested != null) {
+                    Map<String, String> variantFields = Map.of(
+                            "color", "color_agg",
+                            "size", "size_agg",
+                            "material", "material_agg");
+
+                    for (Map.Entry<String, String> entry : variantFields.entrySet()) {
+                        Set<String> values = new HashSet<>();
+                        Terms agg = variantsNested.getAggregations().get(entry.getValue());
+                        if (agg != null) {
+                            agg.getBuckets().forEach(bucket -> {
+                                String key = bucket.getKeyAsString();
+                                if (key != null && !key.isEmpty() && !"N/A".equalsIgnoreCase(key))
+                                    values.add(key);
+                            });
+                        }
+                        filtersSet.put(entry.getKey(), values);
+                    }
+                }
+
+                // Remove search term from filters
+                if (StringUtils.isNotBlank(normalized)) {
+                    String searchTermLower = normalized.toLowerCase(Locale.ROOT);
+                    filtersSet.values().forEach(set -> set.removeIf(v -> v.equalsIgnoreCase(searchTermLower)));
+                }
+
+                // Convert Set -> List
+                Map<String, List<String>> filters = new HashMap<>();
+                filtersSet.forEach((k, v) -> filters.put(k, new ArrayList<>(v)));
+                out.setFilters(filters);
+
+                // Top 7 quick filters
+                List<String> quickFilters = filtersSet.values().stream()
+                        .flatMap(Set::stream)
+                        .limit(7)
+                        .collect(Collectors.toList());
+                out.setQuickFilters(quickFilters);
+            }
+
+            return out;
+
+        } catch (Exception e) {
+            log.error("Error occurred while processing search response", e);
+            throw new ApiException("Search failed: " + e.getMessage(), 500);
         }
-        ProductElasticResponseDocument elasticResponseDocument = new ProductElasticResponseDocument();
-        elasticResponseDocument.setProducts(products);
-        elasticResponseDocument.setSortValues(lastSortValues);
-        return elasticResponseDocument;
     }
+
+    // Helper: normalize query
+    private static final Pattern REPEAT_RUN = Pattern.compile("(\\p{L}|\\p{N})\\1{2,}");
+
+    private String normalizeQuery(String q) {
+        if (q == null)
+            return "";
+        String s = q.trim().toLowerCase(Locale.ROOT);
+        s = REPEAT_RUN.matcher(s).replaceAll("$1$1");
+        return s.length() > 64 ? s.substring(0, 64) : s;
+    }
+
+    public List<String> getSuggestions(String indexName, String input, int size) throws IOException {
+        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+        sourceBuilder.size(size);
+        sourceBuilder.fetchSource(new String[] { "title", "tags" }, null);
+
+        MultiMatchQueryBuilder multiMatch = QueryBuilders.multiMatchQuery(input)
+                .field("title.autocomplete")
+                .field("tags.ngram")
+                .type(MultiMatchQueryBuilder.Type.BOOL_PREFIX);
+
+        sourceBuilder.query(multiMatch);
+
+        SearchRequest request = new SearchRequest(indexName);
+        request.source(sourceBuilder);
+
+        SearchResponse response = restHighLevelClient.search(request, RequestOptions.DEFAULT);
+
+        return Arrays.stream(response.getHits().getHits())
+                .flatMap(hit -> {
+                    String title = (String) hit.getSourceAsMap().get("title");
+
+                    Object tagsObj = hit.getSourceAsMap().get("tags");
+                    List<String> tags = null;
+                    if (tagsObj instanceof List<?>) {
+                        tags = ((List<?>) tagsObj).stream()
+                                .map(Object::toString)
+                                .collect(Collectors.toList());
+                    }
+
+                    return tags == null
+                            ? Stream.of(title)
+                            : Stream.concat(Stream.of(title), tags.stream());
+                })
+                .filter(s -> s != null && !s.isEmpty())
+                .distinct()
+                .limit(size)
+                .collect(Collectors.toList());
+    }
+
 }

@@ -2,9 +2,7 @@ package com.quma.quma_shopify_backend.services;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
-import com.quma.quma_shopify_backend.models.dtos.ProductsRequestDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
-import com.quma.quma_shopify_backend.models.elastic.ProductElasticResponseDocument;
 import com.quma.quma_shopify_backend.models.mongo.Product;
 import com.quma.quma_shopify_backend.repositories.mongo.ProductRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -43,10 +41,6 @@ public class ProductService {
         }
     }
 
-    public ProductElasticResponseDocument searchProducts(ProductsRequestDTO productsRequestDTO) throws Exception {
-        return elasticSearchService.searchProducts(productsRequestDTO);
-    }
-
     public List<ProductElasticDocument> searchProductsByIds(List<String> productIds) throws Exception {
         return elasticSearchService.getProductsByIds(productIds);
     }
@@ -63,4 +57,3 @@ public class ProductService {
         }
     }
 }
-
