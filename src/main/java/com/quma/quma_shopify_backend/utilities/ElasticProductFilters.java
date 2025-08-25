@@ -2,7 +2,8 @@ package com.quma.quma_shopify_backend.utilities;
 
 public class ElasticProductFilters {
 
-    private static final String[] TOP_LEVEL_FILTERS = { "type", "category", "brand" };
+    // added keyword after tags since it was a text, for keywords you dont use that
+    private static final String[] TOP_LEVEL_FILTERS = { "type", "category", "brand", "tags.keyword" };
     private static final String[] NESTED_FILTERS = { "color", "size", "material" };
 
     public static String[] getTopLevelFilters() {

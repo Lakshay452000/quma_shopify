@@ -108,7 +108,7 @@ public class ElasticSearchService {
         try {
             String normalized = normalizeQuery(request.getSearchTerm());
 
-            // Base query
+            // ---------- Base query ----------
             BoolQueryBuilder bool = QueryBuilders.boolQuery()
                     .filter(QueryBuilders.termQuery("isActive", true));
 
@@ -120,7 +120,7 @@ public class ElasticSearchService {
                         .fuzziness(Fuzziness.AUTO));
             }
 
-            // Build search source
+            // ---------- Build search source ----------
             SearchSourceBuilder ssb = new SearchSourceBuilder()
                     .query(bool)
                     .size(request.getPageSize())
@@ -135,23 +135,8 @@ public class ElasticSearchService {
 
             boolean isFirstPage = (request.getSortValues() == null || request.getSortValues().length == 0);
 
-            // Aggregations for first page
+            // ---------- Aggregations for first page ----------
             if (isFirstPage) {
-                // Nested variants
-                NestedAggregationBuilder variantsNestedAgg = AggregationBuilders.nested("variants_nested", "variants")
-                        .subAggregation(AggregationBuilders.terms("color_agg")
-                                .field("variants.color")
-                                .size(100)
-                                .missing("N/A"))
-                        .subAggregation(AggregationBuilders.terms("size_agg")
-                                .field("variants.size")
-                                .size(100)
-                                .missing("N/A"))
-                        .subAggregation(AggregationBuilders.terms("material_agg")
-                                .field("variants.material")
-                                .size(100)
-                                .missing("N/A"));
-                ssb.aggregation(variantsNestedAgg);
 
                 // Top-level
                 for (String field : ElasticProductFilters.getTopLevelFilters()) {
@@ -160,13 +145,23 @@ public class ElasticSearchService {
                             .size(100)
                             .missing("N/A"));
                 }
+
+                // Nested variants
+                NestedAggregationBuilder variantsNestedAgg = AggregationBuilders.nested("variants_nested", "variants");
+                for (String variantField : ElasticProductFilters.getNestedFilters()) {
+                    variantsNestedAgg.subAggregation(AggregationBuilders.terms(variantField + "_agg")
+                            .field("variants." + variantField)
+                            .size(100)
+                            .missing("N/A"));
+                }
+                ssb.aggregation(variantsNestedAgg);
             }
 
-            // Execute search
+            // ---------- Execute search ----------
             SearchRequest searchRequest = new SearchRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME).source(ssb);
             SearchResponse resp = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
 
-            // Parse hits
+            // ---------- Parse hits ----------
             List<ProductElasticDocument> products = new ArrayList<>();
             Object[] lastSortValues = null;
             for (SearchHit hit : resp.getHits().getHits()) {
@@ -181,13 +176,13 @@ public class ElasticSearchService {
             out.setProducts(products);
             out.setSortValues(lastSortValues);
 
-            // Parse aggregations for first page
+            // ---------- Parse aggregations ----------
             if (isFirstPage) {
-                Map<String, Set<String>> filtersSet = new HashMap<>();
+                LinkedHashMap<String, LinkedHashSet<String>> filtersSet = new LinkedHashMap<>();
 
-                // Top-level fields
+                // Top-level
                 for (String field : ElasticProductFilters.getTopLevelFilters()) {
-                    Set<String> values = new HashSet<>();
+                    LinkedHashSet<String> values = new LinkedHashSet<>();
                     Terms agg = resp.getAggregations().get(field + "_agg");
                     if (agg != null) {
                         agg.getBuckets().forEach(bucket -> {
@@ -196,20 +191,21 @@ public class ElasticSearchService {
                                 values.add(key);
                         });
                     }
-                    filtersSet.put(field, values);
+                    String responseKey = field.endsWith(".keyword") ? field.substring(0, field.indexOf(".keyword"))
+                            : field;
+                    filtersSet.put(responseKey, values);
                 }
 
                 // Nested variant fields
                 Nested variantsNested = resp.getAggregations().get("variants_nested");
                 if (variantsNested != null) {
-                    Map<String, String> variantFields = Map.of(
+                    Map<String, String> variantAggMap = Map.of(
                             "color", "color_agg",
                             "size", "size_agg",
                             "material", "material_agg");
-
-                    for (Map.Entry<String, String> entry : variantFields.entrySet()) {
-                        Set<String> values = new HashSet<>();
-                        Terms agg = variantsNested.getAggregations().get(entry.getValue());
+                    for (String field : ElasticProductFilters.getNestedFilters()) {
+                        LinkedHashSet<String> values = new LinkedHashSet<>();
+                        Terms agg = variantsNested.getAggregations().get(variantAggMap.get(field));
                         if (agg != null) {
                             agg.getBuckets().forEach(bucket -> {
                                 String key = bucket.getKeyAsString();
@@ -217,7 +213,7 @@ public class ElasticSearchService {
                                     values.add(key);
                             });
                         }
-                        filtersSet.put(entry.getKey(), values);
+                        filtersSet.put(field, values);
                     }
                 }
 
@@ -227,16 +223,20 @@ public class ElasticSearchService {
                     filtersSet.values().forEach(set -> set.removeIf(v -> v.equalsIgnoreCase(searchTermLower)));
                 }
 
-                // Convert Set -> List
-                Map<String, List<String>> filters = new HashMap<>();
+                // Convert Set -> List preserving order
+                Map<String, List<String>> filters = new LinkedHashMap<>();
                 filtersSet.forEach((k, v) -> filters.put(k, new ArrayList<>(v)));
                 out.setFilters(filters);
 
-                // Top 7 quick filters
-                List<String> quickFilters = filtersSet.values().stream()
-                        .flatMap(Set::stream)
-                        .limit(7)
-                        .collect(Collectors.toList());
+                // Top 7 quick filters preserving the same order
+                List<String> quickFilters = new ArrayList<>();
+                for (String key : filtersSet.keySet()) {
+                    List<String> list = new ArrayList<>(filtersSet.get(key));
+                    for (String v : list) {
+                        if (quickFilters.size() < 7)
+                            quickFilters.add(v);
+                    }
+                }
                 out.setQuickFilters(quickFilters);
             }
 
@@ -248,7 +248,7 @@ public class ElasticSearchService {
         }
     }
 
-    // Helper: normalize query
+    // ---------------- Helper: normalize query ----------------
     private static final Pattern REPEAT_RUN = Pattern.compile("(\\p{L}|\\p{N})\\1{2,}");
 
     private String normalizeQuery(String q) {
