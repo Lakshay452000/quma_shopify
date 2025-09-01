@@ -6,14 +6,15 @@ import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.models.dtos.ProductsRequestDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticResponseDocument;
-import com.quma.quma_shopify_backend.services.implementations.RedisStore;
+import com.quma.quma_shopify_backend.models.mongo.Product;
 import com.quma.quma_shopify_backend.utilities.Constants;
-import com.quma.quma_shopify_backend.utilities.ElasticProductFilters;
+import com.quma.quma_shopify_backend.utilities.ElasticProductUtils;
 
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.lucene.search.join.ScoreMode;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.get.MultiGetItemResponse;
@@ -28,17 +29,21 @@ import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.aggregations.bucket.nested.Nested;
 import org.elasticsearch.search.aggregations.bucket.nested.NestedAggregationBuilder;
-import org.elasticsearch.search.aggregations.bucket.nested.ParsedNested;
-import org.elasticsearch.search.aggregations.bucket.terms.ParsedTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.sort.SortOrder;
+import org.elasticsearch.search.suggest.Suggest;
+import org.elasticsearch.search.suggest.SuggestBuilder;
+import org.elasticsearch.search.suggest.SuggestBuilders;
+import org.elasticsearch.search.suggest.completion.CompletionSuggestion;
+import org.elasticsearch.search.suggest.completion.CompletionSuggestionBuilder;
 import org.elasticsearch.xcontent.XContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.elasticsearch.index.query.*;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -55,8 +60,67 @@ public class ElasticSearchService {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @Autowired
-    private RedisStore redisStore;
+    private Object resolveFieldValue(Object obj, String fieldPath) throws Exception {
+        String[] parts = fieldPath.split("\\."); // supports variants.color
+        Object current = obj;
+
+        for (String part : parts) {
+            if (current == null)
+                return null;
+
+            if (current instanceof List<?> list) {
+                List<Object> values = new ArrayList<>();
+                for (Object item : list) {
+                    Object val = resolveFieldValue(item, String.join(".", Arrays.copyOfRange(parts, 1, parts.length)));
+                    if (val != null) {
+                        if (val instanceof List<?> l)
+                            values.addAll(l);
+                        else
+                            values.add(val);
+                    }
+                }
+                return values;
+            }
+
+            Field field = current.getClass().getDeclaredField(part);
+            field.setAccessible(true);
+            current = field.get(current);
+        }
+
+        return current;
+    }
+
+    public ProductElasticDocument getProductElasticDocuments(Product product) {
+        ProductElasticDocument doc = objectMapper.convertValue(product, ProductElasticDocument.class);
+
+        // Create a list to hold all values for autocompletion
+        List<String> combinedValues = new ArrayList<>();
+
+        // Add the product title
+        if (doc.getTitle() != null) {
+            combinedValues.add(doc.getTitle());
+        }
+
+        // Add tags
+        if (doc.getTags() != null) {
+            combinedValues.addAll(doc.getTags());
+        }
+
+        // Add types
+        if (doc.getTypes() != null) {
+            combinedValues.addAll(doc.getTypes());
+        }
+
+        // Add categories
+        if (doc.getCategories() != null) {
+            combinedValues.addAll(doc.getCategories());
+        }
+
+        // Set both the text and completion fields
+        doc.setAutocomplete(combinedValues);
+
+        return doc;
+    }
 
     public void indexProducts(List<ProductElasticDocument> products) throws Exception {
         try {
@@ -108,19 +172,45 @@ public class ElasticSearchService {
         try {
             String normalized = normalizeQuery(request.getSearchTerm());
 
-            // ---------- Base query ----------
+            // ---------- Base query for hits ----------
             BoolQueryBuilder bool = QueryBuilders.boolQuery()
                     .filter(QueryBuilders.termQuery("isActive", true));
 
             if (StringUtils.isNotBlank(normalized)) {
                 bool.must(QueryBuilders.multiMatchQuery(normalized,
-                        "title", "description", "category", "brand", "tags",
+                        "title", "description", "categories", "types", "brand", "tags",
                         "title.ngram", "description.ngram", "tags.ngram")
                         .type(MultiMatchQueryBuilder.Type.BEST_FIELDS)
                         .fuzziness(Fuzziness.AUTO));
             }
 
-            // ---------- Build search source ----------
+            // ---------- Apply user-selected filters (AND between fields, OR within same
+            // field) ----------
+            if (request.getFilters() != null && !request.getFilters().isEmpty()) {
+                BoolQueryBuilder filterBool = QueryBuilders.boolQuery();
+
+                for (Map.Entry<String, List<String>> entry : request.getFilters().entrySet()) {
+                    String field = entry.getKey();
+                    List<String> values = entry.getValue();
+
+                    if (values != null && !values.isEmpty()) {
+                        BoolQueryBuilder perFieldBool = QueryBuilders.boolQuery();
+                        values.forEach(v -> perFieldBool.should(QueryBuilders.termQuery(field, v)));
+
+                        if (ElasticProductUtils.getNestedFilters().contains(field)) {
+                            filterBool.must(QueryBuilders.nestedQuery("variants", perFieldBool, ScoreMode.None));
+                        } else {
+                            filterBool.must(perFieldBool);
+                        }
+                    }
+                }
+
+                bool.filter(filterBool);
+            }
+
+            boolean isFirstPage = (request.getSortValues() == null || request.getSortValues().length == 0);
+
+            // ---------- Paginated search query ----------
             SearchSourceBuilder ssb = new SearchSourceBuilder()
                     .query(bool)
                     .size(request.getPageSize())
@@ -133,31 +223,6 @@ public class ElasticSearchService {
                 ssb.searchAfter(request.getSortValues());
             }
 
-            boolean isFirstPage = (request.getSortValues() == null || request.getSortValues().length == 0);
-
-            // ---------- Aggregations for first page ----------
-            if (isFirstPage) {
-
-                // Top-level
-                for (String field : ElasticProductFilters.getTopLevelFilters()) {
-                    ssb.aggregation(AggregationBuilders.terms(field + "_agg")
-                            .field(field)
-                            .size(100)
-                            .missing("N/A"));
-                }
-
-                // Nested variants
-                NestedAggregationBuilder variantsNestedAgg = AggregationBuilders.nested("variants_nested", "variants");
-                for (String variantField : ElasticProductFilters.getNestedFilters()) {
-                    variantsNestedAgg.subAggregation(AggregationBuilders.terms(variantField + "_agg")
-                            .field("variants." + variantField)
-                            .size(100)
-                            .missing("N/A"));
-                }
-                ssb.aggregation(variantsNestedAgg);
-            }
-
-            // ---------- Execute search ----------
             SearchRequest searchRequest = new SearchRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME).source(ssb);
             SearchResponse resp = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
 
@@ -176,14 +241,48 @@ public class ElasticSearchService {
             out.setProducts(products);
             out.setSortValues(lastSortValues);
 
-            // ---------- Parse aggregations ----------
+            // ---------- Aggregations (filters & quick filters) ----------
             if (isFirstPage) {
+                // Aggregation query ignores selected filters, uses only search term
+                BoolQueryBuilder aggBool = QueryBuilders.boolQuery();
+                if (StringUtils.isNotBlank(normalized)) {
+                    aggBool.must(QueryBuilders.multiMatchQuery(normalized,
+                            "title", "description", "categories", "types", "brand", "tags",
+                            "title.ngram", "description.ngram", "tags.ngram")
+                            .type(MultiMatchQueryBuilder.Type.BEST_FIELDS)
+                            .fuzziness(Fuzziness.AUTO));
+                }
+
+                SearchSourceBuilder aggSSB = new SearchSourceBuilder().query(aggBool).size(0);
+
+                // Top-level filters
+                for (String field : ElasticProductUtils.getTopLevelFilters()) {
+                    aggSSB.aggregation(AggregationBuilders.terms(field + "_agg")
+                            .field(field)
+                            .size(100)
+                            .missing("N/A"));
+                }
+
+                // Nested variant filters
+                NestedAggregationBuilder variantsNestedAgg = AggregationBuilders.nested("variants_nested", "variants");
+                for (String variantField : ElasticProductUtils.getNestedFilters()) {
+                    variantsNestedAgg.subAggregation(AggregationBuilders.terms(variantField + "_agg")
+                            .field("variants." + variantField)
+                            .size(100)
+                            .missing("N/A"));
+                }
+                aggSSB.aggregation(variantsNestedAgg);
+
+                SearchRequest aggRequest = new SearchRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME).source(aggSSB);
+                SearchResponse aggResp = restHighLevelClient.search(aggRequest, RequestOptions.DEFAULT);
+
+                // ---------- Parse aggregations ----------
                 LinkedHashMap<String, LinkedHashSet<String>> filtersSet = new LinkedHashMap<>();
 
-                // Top-level
-                for (String field : ElasticProductFilters.getTopLevelFilters()) {
+                // Top-level fields
+                for (String field : ElasticProductUtils.getTopLevelFilters()) {
                     LinkedHashSet<String> values = new LinkedHashSet<>();
-                    Terms agg = resp.getAggregations().get(field + "_agg");
+                    Terms agg = aggResp.getAggregations().get(field + "_agg");
                     if (agg != null) {
                         agg.getBuckets().forEach(bucket -> {
                             String key = bucket.getKeyAsString();
@@ -191,19 +290,17 @@ public class ElasticSearchService {
                                 values.add(key);
                         });
                     }
-                    String responseKey = field.endsWith(".keyword") ? field.substring(0, field.indexOf(".keyword"))
-                            : field;
-                    filtersSet.put(responseKey, values);
+                    filtersSet.put(field, values);
                 }
 
                 // Nested variant fields
-                Nested variantsNested = resp.getAggregations().get("variants_nested");
+                Nested variantsNested = aggResp.getAggregations().get("variants_nested");
                 if (variantsNested != null) {
                     Map<String, String> variantAggMap = Map.of(
                             "color", "color_agg",
                             "size", "size_agg",
-                            "material", "material_agg");
-                    for (String field : ElasticProductFilters.getNestedFilters()) {
+                            "materials", "materials_agg");
+                    for (String field : ElasticProductUtils.getNestedFilters()) {
                         LinkedHashSet<String> values = new LinkedHashSet<>();
                         Terms agg = variantsNested.getAggregations().get(variantAggMap.get(field));
                         if (agg != null) {
@@ -228,7 +325,7 @@ public class ElasticSearchService {
                 filtersSet.forEach((k, v) -> filters.put(k, new ArrayList<>(v)));
                 out.setFilters(filters);
 
-                // Top 7 quick filters preserving the same order
+                // Top 7 quick filters
                 List<String> quickFilters = new ArrayList<>();
                 for (String key : filtersSet.keySet()) {
                     List<String> list = new ArrayList<>(filtersSet.get(key));
@@ -260,42 +357,36 @@ public class ElasticSearchService {
     }
 
     public List<String> getSuggestions(String indexName, String input, int size) throws IOException {
+        // Build the query on the single 'autocomplete' field
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
-        sourceBuilder.size(size);
-        sourceBuilder.fetchSource(new String[] { "title", "tags" }, null);
+        sourceBuilder.query(QueryBuilders.matchPhrasePrefixQuery("autocomplete", input.toLowerCase(Locale.ROOT)));
+        sourceBuilder.size(size * 3);
+        sourceBuilder.fetchSource(new String[] { "autocomplete" }, null);
 
-        MultiMatchQueryBuilder multiMatch = QueryBuilders.multiMatchQuery(input)
-                .field("title.autocomplete")
-                .field("tags.ngram")
-                .type(MultiMatchQueryBuilder.Type.BOOL_PREFIX);
+        SearchRequest searchRequest = new SearchRequest(indexName);
+        searchRequest.source(sourceBuilder);
 
-        sourceBuilder.query(multiMatch);
+        SearchResponse response = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
 
-        SearchRequest request = new SearchRequest(indexName);
-        request.source(sourceBuilder);
+        Set<String> results = new LinkedHashSet<>();
+        response.getHits().forEach(hit -> {
+            Map<String, Object> source = hit.getSourceAsMap();
+            if (source.containsKey("autocomplete")) {
+                Object autocompleteObj = source.get("autocomplete");
+                if (autocompleteObj instanceof List<?>) {
+                    ((List<?>) autocompleteObj).forEach(suggestion -> results.add(suggestion.toString()));
+                } else {
+                    results.add(autocompleteObj.toString());
+                }
+            }
+        });
 
-        SearchResponse response = restHighLevelClient.search(request, RequestOptions.DEFAULT);
-
-        return Arrays.stream(response.getHits().getHits())
-                .flatMap(hit -> {
-                    String title = (String) hit.getSourceAsMap().get("title");
-
-                    Object tagsObj = hit.getSourceAsMap().get("tags");
-                    List<String> tags = null;
-                    if (tagsObj instanceof List<?>) {
-                        tags = ((List<?>) tagsObj).stream()
-                                .map(Object::toString)
-                                .collect(Collectors.toList());
-                    }
-
-                    return tags == null
-                            ? Stream.of(title)
-                            : Stream.concat(Stream.of(title), tags.stream());
-                })
-                .filter(s -> s != null && !s.isEmpty())
-                .distinct()
+        // Filter the results to only include words that start with the input
+        List<String> filteredResults = results.stream()
+                .filter(word -> word.toLowerCase(Locale.ROOT).startsWith(input.toLowerCase(Locale.ROOT)))
                 .limit(size)
                 .collect(Collectors.toList());
-    }
 
+        return filteredResults;
+    }
 }

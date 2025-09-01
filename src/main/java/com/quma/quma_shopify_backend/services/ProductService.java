@@ -5,11 +5,11 @@ import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
 import com.quma.quma_shopify_backend.models.mongo.Product;
 import com.quma.quma_shopify_backend.repositories.mongo.ProductRepository;
+
 import lombok.extern.slf4j.Slf4j;
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
 import java.util.Collections;
 import java.util.List;
 
@@ -22,17 +22,11 @@ public class ProductService {
     @Autowired
     private ElasticSearchService elasticSearchService;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
-    private ProductElasticDocument getProductElasticDocuments(Product product) {
-        return objectMapper.convertValue(product, ProductElasticDocument.class);
-    }
-
     public void saveProduct(Product product) {
         try {
             Product savedProduct = productRepository.save(product);
-            ProductElasticDocument productElasticDocuments = getProductElasticDocuments(savedProduct);
+            ProductElasticDocument productElasticDocuments = elasticSearchService
+                    .getProductElasticDocuments(savedProduct);
             elasticSearchService.indexProducts(Collections.singletonList(productElasticDocuments));
 
         } catch (Exception e) {

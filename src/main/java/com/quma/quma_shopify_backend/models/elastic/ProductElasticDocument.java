@@ -24,19 +24,19 @@ import java.util.List;
 public class ProductElasticDocument {
 
     @Id
-    private String id; // Same as Mongo _id
+    private String id;
 
     @Field(type = FieldType.Keyword)
-    private String ownerId; // For access control (creator)
+    private String ownerId;
 
     @Field(type = FieldType.Text)
     private String title;
 
     @Field(type = FieldType.Keyword)
-    private String category;
+    private List<String> categories; // changed from String
 
     @Field(type = FieldType.Keyword)
-    private String type;
+    private List<String> types; // changed from String
 
     @Field(type = FieldType.Keyword)
     private String brand;
@@ -51,9 +51,8 @@ public class ProductElasticDocument {
     private List<String> tags;
 
     @Field(type = FieldType.Keyword)
-    private List<String> images; // One main product image
+    private List<String> images;
 
-    // Review summary
     @Field(type = FieldType.Double)
     private Double averageRating;
 
@@ -74,4 +73,6 @@ public class ProductElasticDocument {
 
     @Field(type = FieldType.Boolean)
     private Boolean isActive;
+
+    private List<String> autocomplete;
 }

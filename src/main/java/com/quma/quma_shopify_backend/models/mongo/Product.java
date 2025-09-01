@@ -26,10 +26,10 @@ public class Product {
     private String brand;
 
     @NotBlank
-    private String category;
+    private List<String> categories;
 
     @NotBlank
-    private String type;
+    private List<String> types;
 
     private List<String> tags;
 

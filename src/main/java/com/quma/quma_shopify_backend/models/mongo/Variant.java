@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 public class Variant {
@@ -21,4 +22,6 @@ public class Variant {
     private BigDecimal discountedPrice; // Base price, can be overridden by variants
 
     private Integer stock;
+
+    private List<String> materials;
 }
