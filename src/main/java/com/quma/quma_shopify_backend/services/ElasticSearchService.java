@@ -32,22 +32,15 @@ import org.elasticsearch.search.aggregations.bucket.nested.NestedAggregationBuil
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.sort.SortOrder;
-import org.elasticsearch.search.suggest.Suggest;
-import org.elasticsearch.search.suggest.SuggestBuilder;
-import org.elasticsearch.search.suggest.SuggestBuilders;
-import org.elasticsearch.search.suggest.completion.CompletionSuggestion;
-import org.elasticsearch.search.suggest.completion.CompletionSuggestionBuilder;
 import org.elasticsearch.xcontent.XContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.elasticsearch.index.query.*;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Service
 @Slf4j
@@ -59,36 +52,6 @@ public class ElasticSearchService {
 
     @Autowired
     private ObjectMapper objectMapper;
-
-    private Object resolveFieldValue(Object obj, String fieldPath) throws Exception {
-        String[] parts = fieldPath.split("\\."); // supports variants.color
-        Object current = obj;
-
-        for (String part : parts) {
-            if (current == null)
-                return null;
-
-            if (current instanceof List<?> list) {
-                List<Object> values = new ArrayList<>();
-                for (Object item : list) {
-                    Object val = resolveFieldValue(item, String.join(".", Arrays.copyOfRange(parts, 1, parts.length)));
-                    if (val != null) {
-                        if (val instanceof List<?> l)
-                            values.addAll(l);
-                        else
-                            values.add(val);
-                    }
-                }
-                return values;
-            }
-
-            Field field = current.getClass().getDeclaredField(part);
-            field.setAccessible(true);
-            current = field.get(current);
-        }
-
-        return current;
-    }
 
     public ProductElasticDocument getProductElasticDocuments(Product product) {
         ProductElasticDocument doc = objectMapper.convertValue(product, ProductElasticDocument.class);

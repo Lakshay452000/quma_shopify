@@ -1,6 +1,5 @@
 package com.quma.quma_shopify_backend.services;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
 import com.quma.quma_shopify_backend.models.mongo.Product;
