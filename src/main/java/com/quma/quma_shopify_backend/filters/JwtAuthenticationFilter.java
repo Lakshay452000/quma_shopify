@@ -39,8 +39,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         if (token != null && jwtUtil.isValid(token)) {
             String username = jwtUtil.extractUsername(token);
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(username, null, List.of(() -> "USER"));
+            UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(username, null,
+                    List.of(() -> "USER"));
             SecurityContextHolder.getContext().setAuthentication(authentication);
         }
 
@@ -50,7 +50,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
-        return path.startsWith("/auth/") || path.startsWith("/user/login") || path.startsWith("/user/register")
-                || path.startsWith("/user/reset-password");
+        return path.startsWith("/auth/") || path.startsWith("/search/") || path.startsWith("/user/login")
+                || path.startsWith("/user/register") || path.startsWith("/products/list")
+                || path.startsWith("/products/search/batch") ||
+                path.startsWith("/user/reset-password") || path.startsWith("/payment/webhook");
     }
 }

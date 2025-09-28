@@ -1,6 +1,9 @@
 package com.quma.quma_shopify_backend.services;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
+import com.quma.quma_shopify_backend.models.dtos.ProductResponseMongoDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
 import com.quma.quma_shopify_backend.models.mongo.Product;
 import com.quma.quma_shopify_backend.repositories.mongo.ProductRepository;
@@ -21,6 +24,9 @@ public class ProductService {
     @Autowired
     private ElasticSearchService elasticSearchService;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     public void saveProduct(Product product) {
         try {
             Product savedProduct = productRepository.save(product);
@@ -38,12 +44,13 @@ public class ProductService {
         return elasticSearchService.getProductsByIds(productIds);
     }
 
-    public List<Product> getProductList(List<String> productIds) {
+    public List<ProductResponseMongoDTO> getProductList(List<String> productIds) {
         try {
-            List<ObjectId> productObjectIds = productIds.stream()
-                    .map(ObjectId::new)
-                    .toList();
-            return productRepository.findAllByIdIn(productObjectIds);
+            List<ProductResponseMongoDTO> productResponseMongoDTOs = objectMapper.convertValue(
+                    productRepository.findAllByProductIdIn(productIds),
+                    new TypeReference<List<ProductResponseMongoDTO>>() {
+                    });
+            return productResponseMongoDTOs;
         } catch (Exception e) {
             log.error("Failed to fetch products list: {}", e.getMessage());
             throw e;

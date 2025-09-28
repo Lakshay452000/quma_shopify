@@ -9,19 +9,21 @@ import java.util.List;
 @Data
 public class Variant {
     @NotBlank
-    private String identifier; // Unique identifier per variant
+    private String identifier;
 
     private String color;
 
-    private String size; // Small, Medium, Large
+    private String size;
 
-    private Double weight; // in kg
+    private Double weight;
 
-    private BigDecimal price; // Base price, can be overridden by variants
+    private BigDecimal price;
 
-    private BigDecimal discountedPrice; // Base price, can be overridden by variants
+    private BigDecimal discountedPrice;
 
     private Integer stock;
 
     private List<String> materials;
+
+    private List<String> images;
 }

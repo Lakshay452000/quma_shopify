@@ -31,24 +31,34 @@ public class AuthService {
     @Autowired
     private IStore tokenStore;
 
-    private static void setAccessAndRefreshCookie(HttpServletResponse response, String accessToken, String refreshToken) {
+    private static void setAccessAndRefreshCookie(HttpServletResponse response, String accessToken,
+            String refreshToken) {
         // Setting access token cookie
-        CookieUtil.setCookie(response, Constants.COOKIE_ACCESS_TOKEN_KEY_NAME, accessToken, Constants.ACCESS_COOKIE_MAX_AGE, Constants.COOKIE_ACCESS_TOKEN_ALLOWED_PATH);
+        CookieUtil.setCookie(response, Constants.COOKIE_ACCESS_TOKEN_KEY_NAME, accessToken,
+                Constants.ACCESS_COOKIE_MAX_AGE, Constants.COOKIE_ACCESS_TOKEN_ALLOWED_PATH);
         // Setting refresh token cookie
-        CookieUtil.setCookie(response, Constants.COOKIE_REFRESH_TOKEN_KEY_NAME, refreshToken, Constants.REFRESH_COOKIE_MAX_AGE, Constants.COOKIE_REFRESH_TOKEN_ALLOWED_PATH);
+        CookieUtil.setCookie(response, Constants.COOKIE_REFRESH_TOKEN_KEY_NAME, refreshToken,
+                Constants.REFRESH_COOKIE_MAX_AGE, Constants.COOKIE_REFRESH_TOKEN_ALLOWED_PATH);
     }
 
     private static void clearAccessAndRefreshCookie(HttpServletResponse response) {
-        CookieUtil.clearCookie(response, Constants.COOKIE_ACCESS_TOKEN_KEY_NAME, Constants.COOKIE_ACCESS_TOKEN_ALLOWED_PATH);
-        CookieUtil.clearCookie(response, Constants.COOKIE_REFRESH_TOKEN_KEY_NAME, Constants.COOKIE_REFRESH_TOKEN_ALLOWED_PATH);
+        CookieUtil.clearCookie(response, Constants.COOKIE_ACCESS_TOKEN_KEY_NAME,
+                Constants.COOKIE_ACCESS_TOKEN_ALLOWED_PATH);
+        CookieUtil.clearCookie(response, Constants.COOKIE_REFRESH_TOKEN_KEY_NAME,
+                Constants.COOKIE_REFRESH_TOKEN_ALLOWED_PATH);
     }
 
-    public void login(String username, HttpServletResponse response) {
+    public Map<String, Object> login(String username, HttpServletResponse response) {
         String accessToken = jwtUtil.generateToken(username, Constants.ACCESS_TOKEN_DURATION.toMillis());
         String refreshToken = jwtUtil.generateToken(username, Constants.REFRESH_TOKEN_DURATION.toMillis());
 
         tokenStore.save(refreshToken, username, Constants.REFRESH_TOKEN_DURATION);
         setAccessAndRefreshCookie(response, accessToken, refreshToken);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("user", username); // replace with full UserDTO if needed
+        result.put("accessTokenExpiry", System.currentTimeMillis() + Constants.ACCESS_TOKEN_DURATION.toMillis());
+        return result;
     }
 
     public void logout(HttpServletRequest request, HttpServletResponse response) {
@@ -76,15 +86,15 @@ public class AuthService {
         tokenStore.save(newToken, username, Constants.REFRESH_TOKEN_DURATION);
     }
 
-    public boolean refreshToken(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> refreshTokenWithExpiry(HttpServletRequest request, HttpServletResponse response) {
         String oldRefreshToken = extractRefreshTokenFromCookie(request);
         if (oldRefreshToken == null || !jwtUtil.isValid(oldRefreshToken)) {
-            return false;
+            return null;
         }
 
         String username = getUsernameFromRefreshToken(oldRefreshToken);
         if (username == null) {
-            return false;
+            return null;
         }
 
         String newAccessToken = jwtUtil.generateToken(username, Constants.ACCESS_TOKEN_DURATION.toMillis());
@@ -93,7 +103,10 @@ public class AuthService {
         replaceRefreshToken(oldRefreshToken, newRefreshToken, username); // Save new and delete old
         setAccessAndRefreshCookie(response, newAccessToken, newRefreshToken);
 
-        return true;
+        Map<String, Object> result = new HashMap<>();
+        result.put("user", username); // replace with full UserDTO if needed
+        result.put("accessTokenExpiry", System.currentTimeMillis() + Constants.ACCESS_TOKEN_DURATION.toMillis());
+        return result;
     }
 
     public boolean authStatus(HttpServletRequest request) {

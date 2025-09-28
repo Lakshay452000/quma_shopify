@@ -1,6 +1,7 @@
 package com.quma.quma_shopify_backend.models.mongo;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import lombok.Data;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
@@ -16,24 +17,26 @@ public class Product {
     @Id
     private String id;
 
+    private String productId;
+
     @NotBlank
     private String title;
 
-    @NotBlank
-    private String description;
+    @NotEmpty
+    private List<String> description;
 
     @NotBlank
     private String brand;
 
-    @NotBlank
+    @NotEmpty
     private List<String> categories;
 
-    @NotBlank
+    @NotEmpty
     private List<String> types;
 
     private List<String> tags;
 
-    @NotBlank
+    @NotEmpty
     private List<Variant> variants; // Different sizes, colors, weight
 
     private Double averageRating;
@@ -53,5 +56,6 @@ public class Product {
     @LastModifiedDate
     private Instant updatedAt;
 
-    private List<String> images; // Each variant can have its own images
+    @NotBlank
+    private String productAddress;
 }

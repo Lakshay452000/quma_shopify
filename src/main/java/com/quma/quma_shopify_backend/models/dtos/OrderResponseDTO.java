@@ -1,14 +1,18 @@
 package com.quma.quma_shopify_backend.models.dtos;
 
-import com.quma.quma_shopify_backend.models.mongo.Order;
+import com.quma.quma_shopify_backend.enums.OrderPaymentStatus;
+import com.quma.quma_shopify_backend.enums.OrderShipmentStatus;
+import com.quma.quma_shopify_backend.enums.OrderStatus;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
 @Data
 @AllArgsConstructor
-@NoArgsConstructor
 public class OrderResponseDTO {
-    private Order order;
-    private String paymentUrl;
+    private String orderId;
+    private Long amount;
+    private OrderPaymentStatus orderPaymentStatus;
+    private OrderShipmentStatus orderShipmentStatus;
+    private OrderStatus orderStatus;
 }

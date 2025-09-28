@@ -6,6 +6,9 @@ import com.quma.quma_shopify_backend.services.implementations.UserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+
+import java.util.Map;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,15 +24,16 @@ public class UserController {
     private UserService userService;
 
     @PostMapping("/register")
-    public ResponseEntity<String> registerUser(@RequestBody UserRequestDTO requestDTO, HttpServletResponse httpServletResponse) {
-        userService.registerUser(requestDTO, httpServletResponse);
-        return ResponseEntity.ok("User registered successfully");
+    public ResponseEntity<?> registerUser(@RequestBody UserRequestDTO requestDTO,
+            HttpServletResponse httpServletResponse) {
+        Map<String, Object> data = userService.registerUser(requestDTO, httpServletResponse);
+        return ResponseEntity.ok(data);
     }
 
     @PostMapping("/login")
-    public ResponseEntity<String> login(@RequestBody UserRequestDTO requestDTO, HttpServletResponse response) {
-        userService.login(requestDTO, response);
-        return ResponseEntity.ok("Logged in successfully");
+    public ResponseEntity<?> login(@RequestBody UserRequestDTO requestDTO, HttpServletResponse response) {
+        Map<String, Object> data = userService.login(requestDTO, response);
+        return ResponseEntity.ok(data);
     }
 
     @PostMapping("/logout")
@@ -44,4 +48,3 @@ public class UserController {
         return ResponseEntity.ok().build();
     }
 }
-

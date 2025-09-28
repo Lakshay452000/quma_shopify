@@ -6,6 +6,8 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
+import com.quma.quma_shopify_backend.models.mongo.OrderItemDTO;
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor

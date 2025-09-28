@@ -7,6 +7,5 @@ import org.springframework.data.mongodb.repository.MongoRepository;
 import java.util.List;
 
 public interface ProductRepository extends MongoRepository<Product, ObjectId> {
-    List<Product> findAllByIdIn(List<ObjectId> ids);
+    List<Product> findAllByProductIdIn(List<String> productIds);
 }
-

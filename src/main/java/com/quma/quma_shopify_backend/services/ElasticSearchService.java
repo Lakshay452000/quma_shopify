@@ -192,6 +192,16 @@ public class ElasticSearchService {
             // ---------- Parse hits ----------
             List<ProductElasticDocument> products = new ArrayList<>();
             Object[] lastSortValues = null;
+            SearchHit[] hits = resp.getHits().getHits();
+            if (hits == null || hits.length == 0) {
+                ProductElasticResponseDocument empty = new ProductElasticResponseDocument();
+                empty.setProducts(Collections.emptyList());
+                empty.setSortValues(null);
+                empty.setFilters(Collections.emptyMap());
+                empty.setQuickFilters(Collections.emptyList());
+                return empty;
+            }
+
             for (SearchHit hit : resp.getHits().getHits()) {
                 ProductElasticDocument p = objectMapper.convertValue(hit.getSourceAsMap(),
                         ProductElasticDocument.class);

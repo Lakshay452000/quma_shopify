@@ -1,81 +1,60 @@
 package com.quma.quma_shopify_backend.services;
 
-import com.quma.quma_shopify_backend.enums.OrderStatus;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.models.dtos.OrderRequestDTO;
 import com.quma.quma_shopify_backend.models.dtos.OrderResponseDTO;
-import com.quma.quma_shopify_backend.models.dtos.PaymentInitResponse;
-import com.quma.quma_shopify_backend.models.dtos.PaymentVerificationDTO;
 import com.quma.quma_shopify_backend.models.mongo.Order;
+import com.quma.quma_shopify_backend.models.mongo.OrderItemDTO;
 import com.quma.quma_shopify_backend.repositories.mongo.OrderRepository;
+import com.quma.quma_shopify_backend.utilities.UtilityFunctions;
+
+import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class OrderService {
 
     @Autowired
     private OrderRepository orderRepository;
-    @Autowired
-    private PaymentService paymentService;
-    @Autowired// Razorpay logic
-    private DeliveryService deliveryService; // Shiprocket logic
 
-    public OrderResponseDTO createOrder(OrderRequestDTO request) {
-        // 1. Save pending order in DB
-        Order order = new Order();
-        order.setUserId(request.getUserId());
-        order.setItems(request.getItems());
-        order.setStatus(OrderStatus.PENDING_PAYMENT);
-        order = orderRepository.save(order);
+    public OrderResponseDTO createOrder(OrderRequestDTO request) throws Exception {
+        try {
+            if (CollectionUtils.isEmpty(request.getItems())) {
+                throw new ApiException("Please add some items in cart", 403);
+            }
+            List<OrderItemDTO> items = new ArrayList<>();
+            long totalAmountPaise = 0;
 
-        // 2. Initiate payment
-        PaymentInitResponse paymentInit = paymentService.initiatePayment(order);
+            for (OrderItemDTO itemDto : request.getItems()) {
+                OrderItemDTO orderItem = new OrderItemDTO();
+                orderItem.setProductId(itemDto.getProductId());
+                orderItem.setQuantity(itemDto.getQuantity());
+                orderItem.setPrice(itemDto.getPrice());
 
-        // 3. Return payment link/order details
-        return new OrderResponseDTO(order, paymentInit.getPaymentUrl());
-    }
+                items.add(orderItem);
+                totalAmountPaise += itemDto.getPrice() * itemDto.getQuantity();
+            }
 
-    public void handlePaymentWebhook(String payload) {
-        // Verify and parse Razorpay payload
-        PaymentVerificationDTO result = paymentService.verifyPayment(payload);
+            Order newOrder = new Order();
+            newOrder.setUserId(request.getUserId());
+            newOrder.setItems(items);
+            newOrder.setAmount(totalAmountPaise);
+            newOrder.setCurrency("INR");
+            String orderId = "ORDER-" + UtilityFunctions.getRandomId();
+            newOrder.setOrderId(orderId);
+            orderRepository.save(newOrder);
 
-        if (result.isSuccess()) {
-            // Update order status to PAID
-            Order order = orderRepository.findById(result.getOrderId())
-                    .orElseThrow(() -> new ApiException("Order not found", 404));
-            order.setStatus(OrderStatus.PAID);
-            orderRepository.save(order);
-
-            // Initiate delivery
-            deliveryService.createShipment(order);
+            return new OrderResponseDTO(newOrder.getId(), newOrder.getAmount(), newOrder.getOrderPaymentStatus(),
+                    newOrder.getOrderShipmentStatus(), newOrder.getOrderStatus());
+        } catch (Exception e) {
+            throw new ApiException("Error creating order: " + e.getMessage(), 500);
         }
-    }
-
-    public OrderResponseDTO getOrder(String orderId) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ApiException("Order not found", 404));
-        return new OrderResponseDTO(order, null);
-    }
-
-    public void cancelOrder(String orderId) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ApiException("Order not found", 404));
-        order.setStatus(OrderStatus.CANCELLED);
-        orderRepository.save(order);
-
-        if (order.getStatus() == OrderStatus.PAID) {
-            paymentService.refundPayment(order);
-        }
-    }
-
-    public List<OrderResponseDTO> getOrdersByUser(String userId) {
-        return orderRepository.findByUserId(userId)
-                .stream()
-                .map(order -> new OrderResponseDTO(order, null))
-                .toList();
     }
 }
-

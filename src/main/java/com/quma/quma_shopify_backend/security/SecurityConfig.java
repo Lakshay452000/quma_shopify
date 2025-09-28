@@ -49,7 +49,10 @@ public class SecurityConfig {
                 .and()
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/user/login", "/user/register", "/user/reset-password", "/auth/**")
+                        .requestMatchers("/user/login", "/user/register", "/user/reset-password", "/auth/**",
+                                "/products/list", "/products/search/batch",
+                                "/search/**",
+                                "/payment/webhook")
                         .permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll() // preflight
                         .anyRequest().authenticated())

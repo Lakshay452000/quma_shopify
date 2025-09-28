@@ -4,6 +4,10 @@ import com.quma.quma_shopify_backend.models.dtos.ProductsRequestDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
 import com.quma.quma_shopify_backend.models.mongo.Product;
 import com.quma.quma_shopify_backend.services.ProductService;
+import com.quma.quma_shopify_backend.utilities.UtilityFunctions;
+
+import jakarta.validation.Valid;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,8 +25,10 @@ public class ProductController {
     private ProductService productService;
 
     @PostMapping("/save")
-    public ResponseEntity<String> registerProduct(@RequestBody Product product) {
+    public ResponseEntity<String> registerProduct(@Valid @RequestBody Product product) {
         try {
+            String productId = "PRODUCT-" + UtilityFunctions.getRandomId();
+            product.setProductId(productId);
             productService.saveProduct(product);
             return ResponseEntity.ok("Product saved and indexed successfully.");
         } catch (Exception e) {
@@ -40,7 +46,8 @@ public class ProductController {
     }
 
     @PostMapping("/search/batch")
-    public ResponseEntity<List<ProductElasticDocument>> searchProductsByIds(@RequestBody ProductsRequestDTO productsRequestDTO) throws Exception {
+    public ResponseEntity<List<ProductElasticDocument>> searchProductsByIds(
+            @RequestBody ProductsRequestDTO productsRequestDTO) throws Exception {
         return ResponseEntity.ok(productService.searchProductsByIds(productsRequestDTO.getProductIds()));
     }
 }

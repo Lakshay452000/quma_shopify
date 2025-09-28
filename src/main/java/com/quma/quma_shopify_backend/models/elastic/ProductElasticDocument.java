@@ -27,6 +27,9 @@ public class ProductElasticDocument {
     private String id;
 
     @Field(type = FieldType.Keyword)
+    private String productId;
+
+    @Field(type = FieldType.Keyword)
     private String ownerId;
 
     @Field(type = FieldType.Text)
@@ -42,7 +45,7 @@ public class ProductElasticDocument {
     private String brand;
 
     @Field(type = FieldType.Text)
-    private String description;
+    private List<String> description;
 
     @Field(type = FieldType.Double)
     private BigDecimal discountedPrice;

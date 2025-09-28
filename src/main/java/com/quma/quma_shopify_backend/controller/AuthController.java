@@ -26,14 +26,13 @@ public class AuthController {
     @Autowired
     private OtpService otpService;
 
-
-    @GetMapping("/new-refresh-token")
-    public ResponseEntity<String> refresh(HttpServletRequest request, HttpServletResponse response) {
-        boolean refreshed = authService.refreshToken(request, response);
-        if (!refreshed) {
+    @PostMapping("/new-refresh-token")
+    public ResponseEntity<?> refresh(HttpServletRequest request, HttpServletResponse response) {
+        Map<String, Object> tokenData = authService.refreshTokenWithExpiry(request, response);
+        if (tokenData == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid or expired refresh token");
         }
-        return ResponseEntity.ok("Token refreshed");
+        return ResponseEntity.ok(tokenData);
     }
 
     @GetMapping("/status")

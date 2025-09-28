@@ -7,8 +7,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-
 @RestController
 @RequestMapping("/orders")
 public class OrderController {
@@ -16,31 +14,8 @@ public class OrderController {
     @Autowired
     private OrderService orderService;
 
-    @PostMapping
-    public ResponseEntity<OrderResponseDTO> createOrder(@RequestBody OrderRequestDTO request) {
+    @PostMapping("create-order")
+    public ResponseEntity<OrderResponseDTO> createOrder(@RequestBody OrderRequestDTO request) throws Exception {
         return ResponseEntity.ok(orderService.createOrder(request));
     }
-
-    @PostMapping("/payment/webhook")
-    public ResponseEntity<Void> handlePaymentWebhook(@RequestBody String payload) {
-        orderService.handlePaymentWebhook(payload);
-        return ResponseEntity.ok().build();
-    }
-
-    @GetMapping("/{orderId}")
-    public ResponseEntity<OrderResponseDTO> getOrder(@PathVariable String orderId) {
-        return ResponseEntity.ok(orderService.getOrder(orderId));
-    }
-
-    @PostMapping("/{orderId}/cancel")
-    public ResponseEntity<Void> cancelOrder(@PathVariable String orderId) {
-        orderService.cancelOrder(orderId);
-        return ResponseEntity.ok().build();
-    }
-
-    @GetMapping("/user/{userId}")
-    public ResponseEntity<List<OrderResponseDTO>> getUserOrders(@PathVariable String userId) {
-        return ResponseEntity.ok(orderService.getOrdersByUser(userId));
-    }
 }
-

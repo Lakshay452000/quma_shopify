@@ -141,6 +141,19 @@
             <artifactId>commons-collections4</artifactId>
             <version>4.4</version>
         </dependency>
+        <!-- razorpay java sdk -->
+        <dependency>
+        <groupId>com.razorpay</groupId>
+        <artifactId>razorpay-java</artifactId>
+        <version>1.4.8</version>
+        </dependency>
+
+        <!-- optional: org.json if not already available -->
+        <dependency>
+        <groupId>org.json</groupId>
+        <artifactId>json</artifactId>
+        <version>20230227</version>
+        </dependency>
 
     </dependencies>
 
