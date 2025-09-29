@@ -9,6 +9,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import com.quma.quma_shopify_backend.utilities.Constants;
+
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,8 +21,10 @@ public class RateLimiterService {
     private final Map<String, Bucket> ipBucketCache = new ConcurrentHashMap<>();
     private final Map<String, Bucket> userBucketCache = new ConcurrentHashMap<>();
 
-    private static final Bandwidth ipLimit = Bandwidth.classic(5, Refill.intervally(5, Duration.ofMinutes(1))); // 5 req/min
-    private static final Bandwidth userLimit = Bandwidth.classic(20, Refill.intervally(20, Duration.ofMinutes(1))); // 20 req/min
+    private static final Bandwidth ipLimit = Bandwidth.classic(Constants.GUEST_RATE_LIMITOR,
+            Refill.intervally(5, Duration.ofMinutes(1))); // 5 req/min
+    private static final Bandwidth userLimit = Bandwidth.classic(Constants.AUTH_USER_RATE_LIMITOR,
+            Refill.intervally(20, Duration.ofMinutes(1))); // 20 req/min
 
     public boolean isAllowed(HttpServletRequest request) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();

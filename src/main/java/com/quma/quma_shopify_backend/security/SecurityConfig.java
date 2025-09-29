@@ -2,6 +2,8 @@ package com.quma.quma_shopify_backend.security;
 
 import com.quma.quma_shopify_backend.filters.JwtAuthenticationFilter;
 import com.quma.quma_shopify_backend.filters.RateLimitingFilter;
+import com.quma.quma_shopify_backend.filters.UserContextFilter;
+
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
@@ -29,6 +31,9 @@ public class SecurityConfig {
 
     @Autowired
     private RateLimitingFilter rateLimitingFilter;
+
+    @Autowired
+    private UserContextFilter userContextFilter;
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
@@ -63,8 +68,9 @@ public class SecurityConfig {
                             response.getWriter().write("{\"message\":\"Unauthorized\"}");
                         }))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
-        // .addFilterBefore(rateLimitingFilter, JwtAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(rateLimitingFilter, JwtAuthenticationFilter.class)
+                .addFilterBefore(userContextFilter, RateLimitingFilter.class);
 
         return http.build();
     }
