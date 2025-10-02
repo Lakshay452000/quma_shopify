@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.quma.quma_shopify_backend.models.dtos.InitiatePaymentResponseDTO;
-import com.quma.quma_shopify_backend.models.dtos.VerifyPaymentDTO;
 import com.quma.quma_shopify_backend.services.PaymentService;
 
 @RestController

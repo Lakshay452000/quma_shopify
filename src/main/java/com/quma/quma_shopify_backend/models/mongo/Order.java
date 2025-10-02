@@ -13,6 +13,7 @@ import com.quma.quma_shopify_backend.enums.OrderPaymentStatus;
 import com.quma.quma_shopify_backend.enums.OrderShipmentStatus;
 import com.quma.quma_shopify_backend.enums.OrderStatus;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -25,10 +26,13 @@ public class Order {
     @Id
     private String id;
 
-    private String userId;
+    private String username;
     private List<OrderItemDTO> items;
-
-    private Long amount;
+    private String couponCode;
+    private BigDecimal subTotal;
+    private BigDecimal discount;
+    private BigDecimal shippingFee;
+    private BigDecimal amount;
     private String currency;
     private String orderId;
     private String razorpayOrderId;

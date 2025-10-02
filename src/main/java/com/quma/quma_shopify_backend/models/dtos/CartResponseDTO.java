@@ -1,5 +1,6 @@
 package com.quma.quma_shopify_backend.models.dtos;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import lombok.AllArgsConstructor;
@@ -11,6 +12,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class CartResponseDTO {
     private List<CartItemDTO> cartItemDTOs;
-    private double totalAmount;
+    private BigDecimal totalAmount;
     private boolean cartChanged;
 }

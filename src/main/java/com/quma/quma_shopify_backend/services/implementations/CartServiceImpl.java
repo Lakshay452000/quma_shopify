@@ -1,5 +1,6 @@
 package com.quma.quma_shopify_backend.services.implementations;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -47,7 +48,7 @@ public class CartServiceImpl implements ICartService {
         if (cart == null) {
             CartResponseDTO emptyResponse = new CartResponseDTO();
             emptyResponse.setCartItemDTOs(Collections.emptyList());
-            emptyResponse.setTotalAmount(0.0);
+            emptyResponse.setTotalAmount(BigDecimal.ZERO);
             return emptyResponse;
         }
 
@@ -60,15 +61,7 @@ public class CartServiceImpl implements ICartService {
     public CartResponseDTO addItem(CartItemRequestDTO item) {
         String username = UserContext.get().getUsername();
 
-        // 1️⃣ Fetch product variant from inventory
-        ProductInventoryDTO productInventoryDTO = inventoryRepository
-                .findById(item.getProductId() + "-" + item.getIdentifier())
-                .orElseThrow(() -> new ApiException("Product not found in inventory", 404));
-
-        int available = productInventoryDTO.getAvailableQuantity();
-        int maxQty = Math.min(5, available);
-
-        // 2️⃣ Fetch or create user's cart
+        // Fetch or create user's cart
         CartItemMongoDTO cart = cartRepository.findByUsername(username);
         if (cart == null) {
             cart = new CartItemMongoDTO();
@@ -82,75 +75,74 @@ public class CartServiceImpl implements ICartService {
 
         boolean cartChanged = false;
 
-        // 3️⃣ Check if item already exists
+        // Check if item already exists
         Optional<CartItemDTO> existingOpt = cartItems.stream()
                 .filter(c -> c.getProductId().equals(item.getProductId()) &&
                         c.getIdentifier().equals(item.getIdentifier()))
                 .findFirst();
 
         int newQty;
+        Product product = productRepository.findByProductId(item.getProductId())
+                .orElseThrow(() -> new ApiException("Product not found", 404));
+        Variant variant = product.getVariants().stream()
+                .filter(v -> v.getIdentifier().equals(item.getIdentifier()))
+                .findFirst()
+                .orElseThrow(() -> new ApiException("Variant not found", 404));
+
+        newQty = Math.min(item.getQuantity(), Math.min(variant.getStock(), 5));
         if (existingOpt.isPresent()) {
             CartItemDTO existing = existingOpt.get();
-            newQty = Math.min(item.getQuantity(), maxQty);
-
-            if (newQty != item.getQuantity()) {
-                cartChanged = true;
-            }
             existing.setQuantity(newQty);
-            existing.setPrice(productInventoryDTO.getPrice()); // optional: keep totalPrice if needed
+            cartChanged = true;
         } else {
-            newQty = Math.min(item.getQuantity(), maxQty);
-            if (newQty < item.getQuantity())
-                cartChanged = true;
-
             CartItemDTO newItem = new CartItemDTO();
-            newItem.setProductId(item.getProductId());
-            newItem.setIdentifier(item.getIdentifier());
+            newItem.setProductId(product.getProductId());
+            newItem.setIdentifier(variant.getIdentifier());
             newItem.setQuantity(newQty);
             cartItems.add(newItem);
+            cartChanged = true;
         }
 
-        // 4️⃣ Update total amount in cart
-        double totalAmount = cartItems.stream()
-                .mapToDouble(ci -> (ci.getPrice() != null ? ci.getPrice() : 0) * ci.getQuantity())
-                .sum();
-        cart.setTotalAmount(totalAmount);
-        cart.setCartItemDTOs(cartItems);
-
-        // 5️⃣ Save cart
-        cartRepository.save(cart);
-
-        // 6️⃣ Build full frontend-compatible response
-        List<CartItemDTO> fullCartItems = cartItems.stream().map(ci -> {
-            Product product = productRepository.findByProductId(ci.getProductId())
-                    .orElseThrow(() -> new ApiException("Product not found", 404));
-
-            Variant variant = product.getVariants().stream()
-                    .filter(v -> v.getIdentifier().equals(ci.getIdentifier()))
+        // Build full enriched cart items (like bulkUpdate)
+        List<CartItemDTO> enrichedItems = cartItems.stream().map(ci -> {
+            Product p = productRepository.findByProductId(ci.getProductId())
+                    .orElseThrow(() -> new ApiException("Product not found: " + ci.getProductId(), 404));
+            Variant v = p.getVariants().stream()
+                    .filter(vv -> vv.getIdentifier().equals(ci.getIdentifier()))
                     .findFirst()
-                    .orElseThrow(() -> new ApiException("Variant not found", 404));
+                    .orElseThrow(() -> new ApiException("Variant not found: " + ci.getIdentifier(), 404));
 
             CartItemDTO dto = new CartItemDTO();
-            dto.setProductId(product.getProductId());
-            dto.setIdentifier(variant.getIdentifier());
-            dto.setTitle(product.getTitle());
-            dto.setDescription(product.getDescription());
-            dto.setPrice(variant.getPrice());
-            dto.setDiscountedPrice(variant.getDiscountedPrice());
-            dto.setColor(variant.getColor());
-            dto.setSize(variant.getSize());
-            dto.setImageUrl(variant.getImages().isEmpty() ? null : variant.getImages().get(0));
-            dto.setStock(variant.getStock());
-            dto.setMaterials(variant.getMaterials());
-            dto.setWeight(variant.getWeight());
+            dto.setProductId(p.getProductId());
+            dto.setIdentifier(v.getIdentifier());
+            dto.setTitle(p.getTitle());
+            dto.setDescription(p.getDescription());
+            dto.setPrice(v.getPrice());
+            dto.setDiscountedPrice(v.getDiscountedPrice());
+            dto.setColor(v.getColor());
+            dto.setSize(v.getSize());
+            dto.setImageUrl(v.getImages().isEmpty() ? null : v.getImages().get(0));
+            dto.setStock(v.getStock());
+            dto.setMaterials(v.getMaterials());
+            dto.setWeight(v.getWeight());
             dto.setQuantity(ci.getQuantity());
-
             return dto;
         }).collect(Collectors.toList());
 
-        // 7️⃣ Build response
+        // Update total amount & save
+        BigDecimal totalAmount = enrichedItems.stream()
+                .map(ci -> (ci.getPrice() != null ? ci.getPrice() : BigDecimal.ZERO)
+                        .multiply(BigDecimal.valueOf(ci.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        cart.setCartItemDTOs(enrichedItems);
+        cart.setTotalAmount(totalAmount);
+        cart.setUpdatedAt(Instant.now());
+        cartRepository.save(cart);
+
+        // Build response
         CartResponseDTO response = new CartResponseDTO();
-        response.setCartItemDTOs(fullCartItems);
+        response.setCartItemDTOs(enrichedItems);
         response.setTotalAmount(totalAmount);
         response.setCartChanged(cartChanged);
 
@@ -165,7 +157,7 @@ public class CartServiceImpl implements ICartService {
             // Return empty response instead of null
             CartResponseDTO emptyResponse = new CartResponseDTO();
             emptyResponse.setCartItemDTOs(Collections.emptyList());
-            emptyResponse.setTotalAmount(0.0);
+            emptyResponse.setTotalAmount(BigDecimal.ZERO);
             emptyResponse.setCartChanged(false);
             return emptyResponse;
         }
@@ -179,7 +171,7 @@ public class CartServiceImpl implements ICartService {
             cartRepository.delete(cart);
             CartResponseDTO emptyResponse = new CartResponseDTO();
             emptyResponse.setCartItemDTOs(Collections.emptyList());
-            emptyResponse.setTotalAmount(0.0);
+            emptyResponse.setTotalAmount(BigDecimal.ZERO);
             emptyResponse.setCartChanged(false);
             return emptyResponse;
         }
@@ -213,9 +205,10 @@ public class CartServiceImpl implements ICartService {
         }).collect(Collectors.toList());
 
         // Update total amount & save
-        double total = fullCartItems.stream()
-                .mapToDouble(ci -> ci.getPrice() != null ? ci.getPrice() * ci.getQuantity() : 0)
-                .sum();
+        BigDecimal total = fullCartItems.stream()
+                .map(ci -> (ci.getPrice() != null ? ci.getPrice() : BigDecimal.ZERO)
+                        .multiply(BigDecimal.valueOf(ci.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         cart.setCartItemDTOs(cart.getCartItemDTOs());
         cart.setTotalAmount(total);
         cart.setUpdatedAt(Instant.now());
@@ -242,7 +235,7 @@ public class CartServiceImpl implements ICartService {
 
             CartResponseDTO emptyResponse = new CartResponseDTO();
             emptyResponse.setCartItemDTOs(Collections.emptyList());
-            emptyResponse.setTotalAmount(0.0);
+            emptyResponse.setTotalAmount(BigDecimal.ZERO);
             emptyResponse.setCartChanged(false);
             return emptyResponse;
         }
@@ -306,9 +299,10 @@ public class CartServiceImpl implements ICartService {
         }
 
         // Save updated cart
-        double total = updatedItems.stream()
-                .mapToDouble(i -> i.getPrice() != null ? i.getPrice() * i.getQuantity() : 0)
-                .sum();
+        BigDecimal total = updatedItems.stream()
+                .map(i -> i.getPrice() != null ? i.getPrice().multiply(BigDecimal.valueOf(i.getQuantity()))
+                        : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         cart.setCartItemDTOs(updatedItems);
         cart.setTotalAmount(total);

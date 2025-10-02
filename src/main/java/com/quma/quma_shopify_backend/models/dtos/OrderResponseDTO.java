@@ -1,18 +1,25 @@
 package com.quma.quma_shopify_backend.models.dtos;
 
-import com.quma.quma_shopify_backend.enums.OrderPaymentStatus;
-import com.quma.quma_shopify_backend.enums.OrderShipmentStatus;
-import com.quma.quma_shopify_backend.enums.OrderStatus;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 
-import lombok.AllArgsConstructor;
+import com.quma.quma_shopify_backend.models.mongo.OrderItemDTO;
+
 import lombok.Data;
 
 @Data
-@AllArgsConstructor
 public class OrderResponseDTO {
     private String orderId;
-    private Long amount;
-    private OrderPaymentStatus orderPaymentStatus;
-    private OrderShipmentStatus orderShipmentStatus;
-    private OrderStatus orderStatus;
+    private String username;
+    private List<OrderItemDTO> items;
+    private BigDecimal amount;
+    private String orderPaymentStatus;
+    private String orderShipmentStatus;
+    private String orderStatus;
+    private Instant createdAt;
+    private BigDecimal subTotal;
+    private BigDecimal discount;
+    private BigDecimal shippingFee;
+
 }

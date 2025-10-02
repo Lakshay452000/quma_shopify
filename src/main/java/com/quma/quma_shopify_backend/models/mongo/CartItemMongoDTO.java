@@ -1,5 +1,6 @@
 package com.quma.quma_shopify_backend.models.mongo;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -18,7 +19,7 @@ public class CartItemMongoDTO {
     private String id;
     private String username;
     List<CartItemDTO> cartItemDTOs;
-    private double totalAmount;
+    private BigDecimal totalAmount;
     private Instant createdAt = Instant.now();
     private Instant updatedAt = Instant.now();
 

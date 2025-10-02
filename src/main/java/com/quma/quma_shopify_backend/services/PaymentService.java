@@ -1,5 +1,6 @@
 package com.quma.quma_shopify_backend.services;
 
+import java.math.BigDecimal;
 import java.util.Map;
 
 import org.json.JSONObject;
@@ -10,7 +11,6 @@ import org.springframework.stereotype.Service;
 import com.quma.quma_shopify_backend.enums.OrderPaymentStatus;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.models.dtos.InitiatePaymentResponseDTO;
-import com.quma.quma_shopify_backend.models.dtos.VerifyPaymentDTO;
 import com.quma.quma_shopify_backend.models.mongo.Order;
 import com.quma.quma_shopify_backend.repositories.mongo.OrderRepository;
 
@@ -36,7 +36,7 @@ public class PaymentService {
 
             String receipt = entity.getOrderId();
 
-            com.razorpay.Order razorpayOrder = razorpayService.createOrder(entity.getAmount(), receipt);
+            com.razorpay.Order razorpayOrder = razorpayService.createOrder(entity.getAmount().longValue(), receipt);
 
             entity.setRazorpayOrderId(razorpayOrder.get("id"));
             entity.setReceipt(receipt);
@@ -103,7 +103,7 @@ public class PaymentService {
 
                 String razorpayPaymentId = payment.getString("id");
                 String razorpayOrderId = payment.getString("order_id");
-                long amount = payment.getLong("amount");
+                BigDecimal amount = payment.getBigDecimal("amount");
                 String receipt = razorpayService.getReceiptFromRazorpayId(razorpayOrderId);
 
                 // Find order by receipt (orderId)
@@ -113,10 +113,10 @@ public class PaymentService {
                     return "Order not found";
                 }
 
-                if ("PAID".equals(order.getOrderPaymentStatus())) {
+                if (OrderPaymentStatus.PAID.equals(order.getOrderPaymentStatus())) {
                     // Duplicate payment → refund
                     try {
-                        razorpayService.refundPayment(razorpayPaymentId, amount);
+                        razorpayService.refundPayment(razorpayPaymentId, amount.longValue());
                         log.warn("Duplicate payment detected for order {}, refund initiated", receipt);
                         return "Duplicate payment refunded";
                     } catch (Exception e) {

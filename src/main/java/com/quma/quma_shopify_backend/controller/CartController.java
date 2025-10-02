@@ -5,7 +5,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.quma.quma_shopify_backend.models.dtos.CartCheckoutRequestDTO;
-import com.quma.quma_shopify_backend.models.dtos.CartItemDTO;
 import com.quma.quma_shopify_backend.models.dtos.CartItemRequestDTO;
 import com.quma.quma_shopify_backend.models.dtos.CartResponseDTO;
 import com.quma.quma_shopify_backend.services.implementations.CartServiceImpl;

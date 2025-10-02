@@ -17,9 +17,9 @@ public class Variant {
 
     private Double weight;
 
-    private Integer price;
+    private BigDecimal price;
 
-    private Integer discountedPrice;
+    private BigDecimal discountedPrice;
 
     private Integer stock;
 

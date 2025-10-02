@@ -1,6 +1,8 @@
 package com.quma.quma_shopify_backend.models.dtos;
 
 import lombok.Data;
+
+import java.math.BigDecimal;
 import java.util.List;
 
 @Data
@@ -10,8 +12,8 @@ public class CartItemDTO {
     private String title;
     private List<String> description;
 
-    private Integer price;
-    private Integer discountedPrice; // nullable if no discount
+    private BigDecimal price;
+    private BigDecimal discountedPrice; // nullable if no discount
 
     private String color;
     private String size;
