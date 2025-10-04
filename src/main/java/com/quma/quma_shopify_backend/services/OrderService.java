@@ -12,13 +12,16 @@ import com.quma.quma_shopify_backend.models.dtos.PagedOrderResponseDTO;
 import com.quma.quma_shopify_backend.models.mongo.CartItemMongoDTO;
 import com.quma.quma_shopify_backend.models.mongo.Order;
 import com.quma.quma_shopify_backend.models.mongo.OrderItemDTO;
+import com.quma.quma_shopify_backend.repositories.mongo.AddressRepository;
 import com.quma.quma_shopify_backend.repositories.mongo.CartRepository;
 import com.quma.quma_shopify_backend.repositories.mongo.OrderRepository;
 import com.quma.quma_shopify_backend.utilities.UserContext;
 import com.quma.quma_shopify_backend.utilities.UtilityFunctions;
+
+import lombok.RequiredArgsConstructor;
+
 import org.apache.commons.collections4.CollectionUtils;
-import org.elasticsearch.common.recycler.Recycler.C;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -27,26 +30,25 @@ import org.springframework.data.domain.Sort;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class OrderService {
 
-    @Autowired
-    OrderRepository orderRepository;
+    private final OrderRepository orderRepository;
 
-    @Autowired
-    CartRepository cartRepository;
+    private final CartRepository cartRepository;
 
-    @Autowired
-    ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
-    @Autowired
-    CouponService couponService;
+    private final CouponService couponService;
 
-    @Autowired
-    ShippingService shippingService;
+    private final ShippingService shippingService;
+
+    private final AddressRepository addressRepository;
 
     /**
      * Create an order for the current user from their cart.
@@ -54,6 +56,7 @@ public class OrderService {
     @Transactional
     public OrderResponseDTO createOrder(CreateOrderRequestDTO createOrderRequestDTO) {
         String couponCode = createOrderRequestDTO.getCouponCode();
+        String addressId = createOrderRequestDTO.getAddressId();
         String username = UserContext.get().getUsername();
         if (username == null || username.isEmpty()) {
             throw new ApiException("Unauthenticated user", 401);
@@ -64,10 +67,13 @@ public class OrderService {
             throw new ApiException("Cart is empty. Cannot create order.", 400);
         }
 
-        // Convert cart items → order items
-        List<OrderItemDTO> orderItems = cart.getCartItemDTOs().stream()
-                .map(ci -> objectMapper.convertValue(ci, OrderItemDTO.class))
-                .collect(Collectors.toList());
+        if (StringUtils.isBlank(addressId)) {
+            throw new ApiException("Shipping address is required to create order", 400);
+        }
+
+        if (addressRepository.findByAddressId(addressId) == null) {
+            throw new ApiException("Invalid shipping address", 400);
+        }
 
         Order order = new Order();
 
@@ -84,6 +90,12 @@ public class OrderService {
             order.setSubTotal(coupon.getOriginalAmount());
             order.setDiscount(coupon.getDiscountAmount());
         }
+
+        // Convert cart items → order items
+        List<OrderItemDTO> orderItems = cart.getCartItemDTOs().stream()
+                .map(ci -> objectMapper.convertValue(ci, OrderItemDTO.class))
+                .collect(Collectors.toList());
+
         // Create Order
         order.setOrderId("ORD-" + UtilityFunctions.getRandomId());
         order.setUsername(username);
@@ -94,9 +106,9 @@ public class OrderService {
         order.setOrderPaymentStatus(OrderPaymentStatus.PENDING);
         order.setOrderShipmentStatus(OrderShipmentStatus.PENDING);
         order.setOrderStatus(OrderStatus.ACTIVE);
-
+        order.setAddressId(addressId);
         order.setCreatedAt(Instant.now());
-
+        order.setExpiresAt(Instant.now().plus(24, ChronoUnit.HOURS));
         orderRepository.save(order);
 
         // Clear cart

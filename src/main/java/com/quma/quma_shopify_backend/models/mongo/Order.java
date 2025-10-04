@@ -25,7 +25,10 @@ public class Order {
 
     @Id
     private String id;
-
+    private String orderId;
+    private String razorpayOrderId;
+    private String paymentId;
+    private String addressId;
     private String username;
     private List<OrderItemDTO> items;
     private String couponCode;
@@ -34,9 +37,6 @@ public class Order {
     private BigDecimal shippingFee;
     private BigDecimal amount;
     private String currency;
-    private String orderId;
-    private String razorpayOrderId;
-    private String paymentId;
     private String signature;
     private String receipt;
     private OrderPaymentStatus orderPaymentStatus = OrderPaymentStatus.PENDING;
@@ -48,4 +48,6 @@ public class Order {
 
     @LastModifiedDate
     private Instant updatedAt;
+
+    private Instant expiresAt;
 }

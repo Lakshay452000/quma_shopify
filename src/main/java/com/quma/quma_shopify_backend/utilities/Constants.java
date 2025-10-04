@@ -22,4 +22,5 @@ public class Constants {
         public static final String REDIS_GLOBAL_FILTERS_KEY = "GLOBAL_FILTERS";
         public static final Integer GUEST_RATE_LIMITOR = 1000;
         public static final Integer AUTH_USER_RATE_LIMITOR = 1000;
+        public static final Integer ORDER_EXPIRY = 1; // in hours
 }
