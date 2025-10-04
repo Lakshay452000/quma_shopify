@@ -9,7 +9,6 @@ import com.quma.quma_shopify_backend.models.mongo.Product;
 import com.quma.quma_shopify_backend.repositories.mongo.ProductRepository;
 
 import lombok.extern.slf4j.Slf4j;
-import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.util.Collections;

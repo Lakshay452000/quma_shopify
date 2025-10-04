@@ -11,8 +11,6 @@ import org.springframework.data.elasticsearch.annotations.FieldType;
 
 import com.quma.quma_shopify_backend.models.mongo.Variant;
 
-import jakarta.validation.constraints.NotBlank;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -71,11 +69,10 @@ public class ProductElasticDocument {
     @Transient
     private Object[] sortValues;
 
-    @NotBlank
+    @Field(type = FieldType.Nested, includeInParent = true)
     private List<Variant> variants;
 
     @Field(type = FieldType.Boolean)
     private Boolean isActive;
 
-    private List<String> autocomplete;
 }
