@@ -1,16 +1,21 @@
 package com.quma.quma_shopify_backend.services.implementations;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quma.quma_shopify_backend.enums.OtpPurpose;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.interfaces.IUserService;
 import com.quma.quma_shopify_backend.mappers.UserMapper;
 import com.quma.quma_shopify_backend.models.dtos.ResetPasswordRequestDTO;
+import com.quma.quma_shopify_backend.models.dtos.UserProfileRequestDTO;
 import com.quma.quma_shopify_backend.models.dtos.UserRequestDTO;
 import com.quma.quma_shopify_backend.models.mongo.User;
 import com.quma.quma_shopify_backend.repositories.mongo.UserInfoRepository;
 import com.quma.quma_shopify_backend.services.AuthService;
 import com.quma.quma_shopify_backend.utilities.EncryptionUtil;
+import com.quma.quma_shopify_backend.utilities.UserContext;
 import com.quma.quma_shopify_backend.validators.UserValidator;
+
+import io.micrometer.common.util.StringUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -35,11 +40,14 @@ public class UserService implements IUserService {
     @Autowired
     AuthService authService;
 
+    @Autowired
+    ObjectMapper objectMapper;
+
     @Override
     public Map<String, Object> registerUser(UserRequestDTO userRequestDTO, HttpServletResponse httpServletResponse) {
         userValidator.validateUserRequest(userRequestDTO);
         otpService.ensureOtpVerified(userRequestDTO.getPhone(), OtpPurpose.REGISTRATION);
-        User user = UserMapper.toUserModel(userRequestDTO);
+        User user = objectMapper.convertValue(userRequestDTO, User.class);
         user.setPassword(EncryptionUtil.bcryptHash(userRequestDTO.getPassword()));
         try {
             userInfoRepository.save(user);
@@ -73,4 +81,59 @@ public class UserService implements IUserService {
         user.setPassword(EncryptionUtil.bcryptHash(resetPasswordRequestDTO.getNewPassword()));
         userInfoRepository.save(user);
     }
+
+    @Override
+    public void updateProfile(HttpServletRequest request, UserProfileRequestDTO profileDTO) {
+        String phone = "8529081119";
+        User user = userInfoRepository.findByPhone(phone)
+                .orElseThrow(() -> new ApiException("User not found", 404));
+
+        if (StringUtils.isNotBlank(profileDTO.getName())) {
+            user.setName(profileDTO.getName());
+        }
+        if (StringUtils.isNotBlank(profileDTO.getEmail())) {
+            user.setEmail(profileDTO.getEmail());
+        }
+        if (profileDTO.getGender() != null) {
+            user.setGender(profileDTO.getGender());
+        }
+        if (profileDTO.getDateOfBirth() != null) {
+            user.setDateOfBirth(profileDTO.getDateOfBirth());
+
+        }
+        if (user.getName() != null && user.getEmail() != null && user.getGender() != null
+                && user.getDateOfBirth() != null && !user.isProfileCompleted()) {
+            user.setProfileCompleted(true);
+        }
+
+        userInfoRepository.save(user);
+    }
+
+    @Override
+    public Map<String, Object> getCurrentUser(HttpServletRequest request) {
+        String phone = "8529081119";
+        // UserContext.get().getUsername();
+        User user = userInfoRepository.findByPhone(phone)
+                .orElseThrow(() -> new ApiException("User not found", 404));
+
+        return Map.of(
+                "phone", user.getPhone(),
+                "profileCompleted", user.isProfileCompleted());
+    }
+
+    @Override
+    public Map<String, Object> getUserProfile(HttpServletRequest request) {
+        String phone = "8529081119";
+        User user = userInfoRepository.findByPhone(phone)
+                .orElseThrow(() -> new ApiException("User not found", 404));
+
+        return Map.of(
+                "name", user.getName(),
+                "email", user.getEmail(),
+                "phone", user.getPhone(),
+                "gender", user.getGender(),
+                "dateOfBirth", user.getDateOfBirth(),
+                "profileCompleted", user.isProfileCompleted());
+    }
+
 }

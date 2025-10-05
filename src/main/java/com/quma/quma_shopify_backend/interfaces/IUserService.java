@@ -3,6 +3,7 @@ package com.quma.quma_shopify_backend.interfaces;
 import java.util.Map;
 
 import com.quma.quma_shopify_backend.models.dtos.ResetPasswordRequestDTO;
+import com.quma.quma_shopify_backend.models.dtos.UserProfileRequestDTO;
 import com.quma.quma_shopify_backend.models.dtos.UserRequestDTO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -16,4 +17,11 @@ public interface IUserService {
     void logout(HttpServletRequest request, HttpServletResponse httpResp);
 
     void resetPassword(ResetPasswordRequestDTO resetPasswordRequestDTO);
+
+    void updateProfile(HttpServletRequest request, UserProfileRequestDTO userProfileRequestDTO);
+
+    Map<String, Object> getCurrentUser(HttpServletRequest request);
+
+    Map<String, Object> getUserProfile(HttpServletRequest request);
+
 }

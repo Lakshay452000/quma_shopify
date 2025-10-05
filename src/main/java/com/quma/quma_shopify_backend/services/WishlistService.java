@@ -11,12 +11,14 @@ import com.quma.quma_shopify_backend.repositories.mongo.WishlistRepository;
 import com.quma.quma_shopify_backend.utilities.UserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -28,6 +30,7 @@ public class WishlistService {
     private final ProductRepository productRepository;
     private final ObjectMapper objectMapper;
 
+    // ✅ Toggle add/remove single wishlist
     public String toggleWishlist(WishlistRequestDTO request) {
         String username = UserContext.get().getUsername();
         String productId = request.getProductId();
@@ -68,34 +71,38 @@ public class WishlistService {
 
                 Wishlist wishlist = objectMapper.convertValue(wishlistMap, Wishlist.class);
                 wishlistRepository.save(wishlist);
-
                 log.info("Added wishlist item for user {} -> product {} variant {}", username, productId, identifier);
             }
-        } else {
-            if (existing != null) {
-                wishlistRepository.deleteByUsernameAndProductIdAndIdentifier(username, productId, identifier);
-                log.info("Removed wishlist item for user {} -> product {} variant {}", username, productId, identifier);
-            }
+        } else if (existing != null) {
+            wishlistRepository.deleteByUsernameAndProductIdAndIdentifier(username, productId, identifier);
+            log.info("Removed wishlist item for user {} -> product {} variant {}", username, productId, identifier);
         }
 
         return markWishlist ? "added" : "removed";
     }
 
-    public List<WishlistResponseDTO> getWishlist() {
+    // ✅ Paginated wishlist fetch
+    public Page<WishlistResponseDTO> getWishlist(int page, int size) {
         String username = UserContext.get().getUsername();
-        List<Wishlist> wishlists = wishlistRepository.findByUsername(username);
+        Pageable pageable = PageRequest.of(page, size);
 
-        return wishlists.stream()
+        Page<Wishlist> wishlistPage = wishlistRepository.findByUsername(username, pageable);
+
+        List<WishlistResponseDTO> wishlistDTOs = wishlistPage.getContent().stream()
                 .map(w -> objectMapper.convertValue(w, WishlistResponseDTO.class))
                 .collect(Collectors.toList());
+
+        return new PageImpl<>(wishlistDTOs, pageable, wishlistPage.getTotalElements());
     }
 
+    // ✅ Clean duplicate-safe bulk add
     public void bulkAddToWishlist(List<WishlistRequestDTO> requests) {
-        if (requests.isEmpty())
+        if (requests == null || requests.isEmpty())
             return;
 
         String username = UserContext.get().getUsername();
 
+        // Group by productId for efficient queries
         Map<String, List<String>> productVariantsMap = requests.stream()
                 .collect(Collectors.groupingBy(
                         WishlistRequestDTO::getProductId,
@@ -108,16 +115,17 @@ public class WishlistService {
             Product product = productRepository.findByProductId(productId)
                     .orElseThrow(() -> new RuntimeException("Product not found"));
 
-            List<Wishlist> existingWishlists = wishlistRepository.findByUsernameAndProductId(username, productId);
-            Map<String, Wishlist> existingMap = existingWishlists.stream()
-                    .collect(Collectors.toMap(Wishlist::getIdentifier, w -> w));
+            // Find existing wishlists for this user and product
+            List<Wishlist> existing = wishlistRepository.findByUsernameAndProductId(username, productId);
+            Set<String> existingIdentifiers = existing.stream()
+                    .map(Wishlist::getIdentifier)
+                    .collect(Collectors.toSet());
 
-            List<Wishlist> wishlistsToSave = product.getVariants().stream()
-                    .filter(v -> identifiers.contains(v.getIdentifier()))
+            // Filter only new variants not in wishlist
+            List<Wishlist> toSave = product.getVariants().stream()
+                    .filter(v -> identifiers.contains(v.getIdentifier())
+                            && !existingIdentifiers.contains(v.getIdentifier()))
                     .map(variant -> {
-                        if (existingMap.containsKey(variant.getIdentifier()))
-                            return null;
-
                         String firstImage = (variant.getImages() != null && !variant.getImages().isEmpty())
                                 ? variant.getImages().get(0)
                                 : "";
@@ -138,13 +146,10 @@ public class WishlistService {
 
                         return objectMapper.convertValue(wishlistMap, Wishlist.class);
                     })
-                    .filter(w -> w != null)
                     .collect(Collectors.toList());
 
-            // ✅ No longer update product variants
-            if (!wishlistsToSave.isEmpty()) {
-                wishlistRepository.saveAll(wishlistsToSave);
-            }
+            if (!toSave.isEmpty())
+                wishlistRepository.saveAll(toSave);
         }
 
         log.info("Bulk added wishlist items for user {}", username);
