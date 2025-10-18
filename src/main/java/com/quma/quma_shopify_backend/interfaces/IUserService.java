@@ -18,10 +18,10 @@ public interface IUserService {
 
     void resetPassword(ResetPasswordRequestDTO resetPasswordRequestDTO);
 
-    void updateProfile(HttpServletRequest request, UserProfileRequestDTO userProfileRequestDTO);
+    void updateProfile(UserProfileRequestDTO userProfileRequestDTO);
 
-    Map<String, Object> getCurrentUser(HttpServletRequest request);
+    Map<String, Object> getCurrentUser();
 
-    Map<String, Object> getUserProfile(HttpServletRequest request);
+    Map<String, Object> getUserProfile();
 
 }

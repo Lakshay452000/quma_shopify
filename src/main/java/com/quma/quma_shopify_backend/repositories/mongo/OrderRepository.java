@@ -30,4 +30,7 @@ public interface OrderRepository extends MongoRepository<Order, String>, OrderRe
             OrderStatus orderStatus,
             OrderPaymentStatus orderPaymentStatus,
             Instant expiresAt);
+
+    boolean existsByUsernameAndItemsProductId(String username, String productId);
+
 }

@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quma.quma_shopify_backend.enums.OtpPurpose;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.interfaces.IUserService;
-import com.quma.quma_shopify_backend.mappers.UserMapper;
 import com.quma.quma_shopify_backend.models.dtos.ResetPasswordRequestDTO;
 import com.quma.quma_shopify_backend.models.dtos.UserProfileRequestDTO;
 import com.quma.quma_shopify_backend.models.dtos.UserRequestDTO;
@@ -83,7 +82,7 @@ public class UserService implements IUserService {
     }
 
     @Override
-    public void updateProfile(HttpServletRequest request, UserProfileRequestDTO profileDTO) {
+    public void updateProfile(UserProfileRequestDTO profileDTO) {
         String phone = "8529081119";
         User user = userInfoRepository.findByPhone(phone)
                 .orElseThrow(() -> new ApiException("User not found", 404));
@@ -110,10 +109,9 @@ public class UserService implements IUserService {
     }
 
     @Override
-    public Map<String, Object> getCurrentUser(HttpServletRequest request) {
-        String phone = "8529081119";
-        // UserContext.get().getUsername();
-        User user = userInfoRepository.findByPhone(phone)
+    public Map<String, Object> getCurrentUser() {
+        String username = UserContext.get().getUsername();
+        User user = userInfoRepository.findByPhone(username)
                 .orElseThrow(() -> new ApiException("User not found", 404));
 
         return Map.of(
@@ -122,9 +120,9 @@ public class UserService implements IUserService {
     }
 
     @Override
-    public Map<String, Object> getUserProfile(HttpServletRequest request) {
-        String phone = "8529081119";
-        User user = userInfoRepository.findByPhone(phone)
+    public Map<String, Object> getUserProfile() {
+        String username = UserContext.get().getUsername();
+        User user = userInfoRepository.findByPhone(username)
                 .orElseThrow(() -> new ApiException("User not found", 404));
 
         return Map.of(

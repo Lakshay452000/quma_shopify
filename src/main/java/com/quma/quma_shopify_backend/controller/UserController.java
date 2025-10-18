@@ -53,22 +53,21 @@ public class UserController {
 
     @PostMapping("/update-profile")
     public ResponseEntity<?> updateProfile(
-            @Valid @RequestBody UserProfileRequestDTO profileDTO,
-            HttpServletRequest request) {
+            @Valid @RequestBody UserProfileRequestDTO profileDTO) {
 
-        userService.updateProfile(request, profileDTO);
+        userService.updateProfile(profileDTO);
         return ResponseEntity.ok(Map.of("message", "Profile updated successfully"));
     }
 
     @GetMapping("/check-profile-completion")
-    public ResponseEntity<?> getCurrentUser(HttpServletRequest request) {
-        Map<String, Object> data = userService.getCurrentUser(request);
+    public ResponseEntity<?> getCurrentUser() {
+        Map<String, Object> data = userService.getCurrentUser();
         return ResponseEntity.ok(data);
     }
 
     @GetMapping("/profile")
-    public ResponseEntity<?> getUserProfile(HttpServletRequest request) {
-        Map<String, Object> data = userService.getUserProfile(request);
+    public ResponseEntity<?> getUserProfile() {
+        Map<String, Object> data = userService.getUserProfile();
         return ResponseEntity.ok(data);
     }
 

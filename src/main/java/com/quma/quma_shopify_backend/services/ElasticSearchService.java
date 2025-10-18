@@ -9,6 +9,7 @@ import com.quma.quma_shopify_backend.models.elastic.ProductElasticResponseDocume
 import com.quma.quma_shopify_backend.models.mongo.Product;
 import com.quma.quma_shopify_backend.utilities.Constants;
 import com.quma.quma_shopify_backend.utilities.ElasticProductUtils;
+import org.elasticsearch.action.update.UpdateRequest;
 
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import lombok.extern.slf4j.Slf4j;
@@ -41,7 +42,6 @@ import java.io.IOException;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import org.elasticsearch.action.update.UpdateRequest;
 
 @Service
 @Slf4j
@@ -337,38 +337,18 @@ public class ElasticSearchService {
         return filteredResults;
     }
 
-    // public boolean updateProductField(String productId, Map<String, Object>
-    // fieldsToUpdate,
-    // Map<String, Map<String, Object>> nestedVariantUpdates) {
-    // try {
-    // Map<String, Object> updateMap = new HashMap<>(fieldsToUpdate);
+    public void updateFields(String indexName, String documentId, Map<String, Object> fields) {
+        try {
+            if (fields == null || fields.isEmpty())
+                return;
 
-    // // Handle nested variant updates if provided
-    // if (nestedVariantUpdates != null && !nestedVariantUpdates.isEmpty()) {
-    // // 'variants' is a list of maps
-    // List<Map<String, Object>> variantsUpdateList = new ArrayList<>();
-
-    // nestedVariantUpdates.forEach((variantId, updates) -> {
-    // Map<String, Object> variantMap = new HashMap<>(updates);
-    // variantMap.put("identifier", variantId); // identify which variant to update
-    // variantsUpdateList.add(variantMap);
-    // });
-
-    // updateMap.put("variants", variantsUpdateList);
-    // }
-
-    // UpdateRequest updateRequest = new
-    // UpdateRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME, productId)
-    // .doc(updateMap)
-    // .docAsUpsert(false); // do not create if missing
-
-    // restHighLevelClient.update(updateRequest, RequestOptions.DEFAULT);
-    // log.info("Updated product {} with fields {}", productId, updateMap.keySet());
-    // return true;
-    // } catch (Exception e) {
-    // log.error("Failed to update product {}: {}", productId, e.getMessage());
-    // return false;
-    // }
-    // }
+            UpdateRequest request = new UpdateRequest(indexName, documentId)
+                    .doc(fields);
+            restHighLevelClient.update(request, RequestOptions.DEFAULT);
+        } catch (Exception e) {
+            // Log error; in real systems, you might push to a retry queue
+            System.err.println("Failed to update Elastic document " + documentId + ": " + e.getMessage());
+        }
+    }
 
 }

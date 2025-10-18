@@ -173,4 +173,8 @@ public class OrderService {
         return response;
     }
 
+    public boolean hasUserPurchasedProduct(String username, String productId) {
+        return orderRepository.existsByUsernameAndItemsProductId(username, productId);
+    }
+
 }
