@@ -22,31 +22,31 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<Map<String, Object>> handleApiException(ApiException ex) {
-        log.error("Error caught : ", ex);
+        log.error("Error caught : {}", ex.getMessage());
         return buildResponse(ex.getStatusCode(), ex.getMessage());
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneral(Exception ex) {
-        log.error("Error caught : ", ex);
+        log.error("Error caught : {}", ex.getMessage());
         return buildResponse(500, "Internal Server Error"); // Or hide message in prod
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, Object>> handleBodyMissing(HttpMessageNotReadableException ex) {
-        log.error("Error caught : ", ex);
+        log.error("Error caught : {}", ex.getMessage());
         return buildResponse(400, "Please provide a valid request body");
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<Map<String, Object>> handleMethodNotAllowed(HttpRequestMethodNotSupportedException ex) {
-        log.error("Error caught : ", ex);
+        log.error("Error caught : {}", ex.getMessage());
         return buildResponse(405, "Method not allowed");
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
-        log.error("Error caught : ", ex.getMessage());
+        log.error("Error caught : {}", ex.getMessage());
         return buildResponse(405, "Request body validation failed");
     }
 

@@ -267,9 +267,19 @@ public class ElasticSearchService {
                     filtersSet.values().forEach(set -> set.removeIf(v -> v.equalsIgnoreCase(searchTermLower)));
                 }
 
-                // Convert Set -> List preserving order
                 Map<String, List<String>> filters = new LinkedHashMap<>();
-                filtersSet.forEach((k, v) -> filters.put(k, new ArrayList<>(v)));
+
+                filtersSet.forEach((k, v) -> {
+                    int idx = k.indexOf(".keyword");
+                    String cleanKey = (idx != -1) ? k.substring(0, idx) : k;
+
+                    if (!cleanKey.isEmpty()) {
+                        cleanKey = Character.toUpperCase(cleanKey.charAt(0)) + cleanKey.substring(1);
+                    }
+
+                    filters.put(cleanKey, new ArrayList<>(v));
+                });
+
                 out.setFilters(filters);
 
                 // Top 7 quick filters

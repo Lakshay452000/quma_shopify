@@ -83,7 +83,7 @@ public class UserService implements IUserService {
 
     @Override
     public void updateProfile(UserProfileRequestDTO profileDTO) {
-        String phone = "8529081119";
+        String phone = UserContext.get().getUsername();
         User user = userInfoRepository.findByPhone(phone)
                 .orElseThrow(() -> new ApiException("User not found", 404));
 
