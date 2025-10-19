@@ -126,7 +126,14 @@ public class ElasticSearchService {
             if (request.getFilters() != null && !request.getFilters().isEmpty()) {
                 BoolQueryBuilder filterBool = QueryBuilders.boolQuery();
 
-                for (Map.Entry<String, List<String>> entry : request.getFilters().entrySet()) {
+                Map<String, List<String>> normalizedFilters = new HashMap<>();
+                request.getFilters().forEach((k, v) -> {
+                    if (v != null && !v.isEmpty()) {
+                        String normalizedKey = Character.toLowerCase(k.charAt(0)) + k.substring(1);
+                        normalizedFilters.put(normalizedKey, v);
+                    }
+                });
+                for (Map.Entry<String, List<String>> entry : normalizedFilters.entrySet()) {
                     String field = entry.getKey();
                     List<String> values = entry.getValue();
 
