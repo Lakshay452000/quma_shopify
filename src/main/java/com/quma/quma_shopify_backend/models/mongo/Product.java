@@ -43,6 +43,8 @@ public class Product {
 
     private Long totalReviews;
 
+    private Long totalBuyers;
+
     @NotBlank
     private String ownerId; // The user who created this product
 

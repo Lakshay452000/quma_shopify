@@ -46,6 +46,8 @@ public class AddressService {
         String username = UserContext.get().getUsername();
         Address updated = repository.findByUsernameAndAddressId(username, addressId)
                 .map(addr -> {
+                    addr.setName(update.getName());
+                    addr.setPhoneNumber(update.getPhoneNumber());
                     addr.setHouse(update.getHouse());
                     addr.setArea(update.getArea());
                     addr.setCity(update.getCity());

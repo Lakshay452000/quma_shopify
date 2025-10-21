@@ -10,5 +10,5 @@ public class ProductElasticResponseDocument {
     private List<ProductElasticDocument> products;
     private Object[] sortValues;
     private Map<String, List<String>> filters;
-    private List<String> quickFilters;
+    private Map<String, List<String>> quickFilters;
 }

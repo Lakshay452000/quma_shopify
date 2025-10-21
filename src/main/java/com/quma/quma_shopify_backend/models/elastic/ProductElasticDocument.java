@@ -60,6 +60,9 @@ public class ProductElasticDocument {
     @Field(type = FieldType.Integer)
     private Integer totalReviews;
 
+    @Field(type = FieldType.Integer)
+    private Integer totalBuyers;
+
     @Field(type = FieldType.Date)
     private Instant createdAt;
 

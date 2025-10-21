@@ -11,6 +11,7 @@ import java.util.Map;
 @Data
 public class ProductsRequestDTO {
     private List<String> productIds;
+    private boolean initialLoad;
     private Map<String, List<String>> filters;
     @JsonSetter(nulls = Nulls.SKIP)
     private int pageSize = 20; // Default page size

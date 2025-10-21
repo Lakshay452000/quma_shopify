@@ -152,7 +152,7 @@ public class ElasticSearchService {
                 bool.filter(filterBool);
             }
 
-            boolean isFirstPage = (request.getSortValues() == null || request.getSortValues().length == 0);
+            boolean isFirstPage = request.isInitialLoad();
 
             // ---------- Paginated search query ----------
             SearchSourceBuilder ssb = new SearchSourceBuilder()
@@ -179,7 +179,7 @@ public class ElasticSearchService {
                 empty.setProducts(Collections.emptyList());
                 empty.setSortValues(null);
                 empty.setFilters(Collections.emptyMap());
-                empty.setQuickFilters(Collections.emptyList());
+                empty.setQuickFilters(Collections.emptyMap());
                 return empty;
             }
 
@@ -275,30 +275,30 @@ public class ElasticSearchService {
                 }
 
                 Map<String, List<String>> filters = new LinkedHashMap<>();
-
                 filtersSet.forEach((k, v) -> {
                     int idx = k.indexOf(".keyword");
                     String cleanKey = (idx != -1) ? k.substring(0, idx) : k;
 
                     if (!cleanKey.isEmpty()) {
+                        // Capitalize first letter
                         cleanKey = Character.toUpperCase(cleanKey.charAt(0)) + cleanKey.substring(1);
                     }
 
                     filters.put(cleanKey, new ArrayList<>(v));
                 });
-
                 out.setFilters(filters);
 
-                // Top 7 quick filters
-                List<String> quickFilters = new ArrayList<>();
+                // Quick filters too
+                Map<String, List<String>> quickFilters = new LinkedHashMap<>();
                 for (String key : filtersSet.keySet()) {
-                    List<String> list = new ArrayList<>(filtersSet.get(key));
-                    for (String v : list) {
-                        if (quickFilters.size() < 7)
-                            quickFilters.add(v);
+                    String capKey = Character.toUpperCase(key.charAt(0)) + key.substring(1);
+                    List<String> values = new ArrayList<>(filtersSet.get(key));
+                    if (!values.isEmpty()) {
+                        quickFilters.put(capKey, values.stream().limit(7).collect(Collectors.toList()));
                     }
                 }
                 out.setQuickFilters(quickFilters);
+
             }
 
             return out;
@@ -321,37 +321,109 @@ public class ElasticSearchService {
     }
 
     public List<String> getSuggestions(String indexName, String input, int size) throws IOException {
-        // Build the query on the single 'autocomplete' field
+        if (input == null || input.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        String inputLower = input.toLowerCase(Locale.ROOT);
+
+        // Multi-match query on ngram fields
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
-        sourceBuilder.query(QueryBuilders.matchPhrasePrefixQuery("autocomplete", input.toLowerCase(Locale.ROOT)));
-        sourceBuilder.size(size * 3);
-        sourceBuilder.fetchSource(new String[] { "autocomplete" }, null);
+        sourceBuilder.query(QueryBuilders.multiMatchQuery(inputLower,
+                "title.ngram", "tags.ngram", "brand.ngram", "categories.ngram")
+                .type(MultiMatchQueryBuilder.Type.PHRASE_PREFIX));
+        sourceBuilder.size(100); // fetch more for proper ranking
+        sourceBuilder.fetchSource(new String[] { "title", "tags", "brand", "categories" }, null);
 
         SearchRequest searchRequest = new SearchRequest(indexName);
         searchRequest.source(sourceBuilder);
 
         SearchResponse response = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
 
-        Set<String> results = new LinkedHashSet<>();
-        response.getHits().forEach(hit -> {
+        // Collect suggestions with field info
+        List<SuggestionItem> candidates = new ArrayList<>();
+        for (SearchHit hit : response.getHits()) {
             Map<String, Object> source = hit.getSourceAsMap();
-            if (source.containsKey("autocomplete")) {
-                Object autocompleteObj = source.get("autocomplete");
-                if (autocompleteObj instanceof List<?>) {
-                    ((List<?>) autocompleteObj).forEach(suggestion -> results.add(suggestion.toString()));
-                } else {
-                    results.add(autocompleteObj.toString());
-                }
-            }
-        });
 
-        // Filter the results to only include words that start with the input
-        List<String> filteredResults = results.stream()
-                .filter(word -> word.toLowerCase(Locale.ROOT).startsWith(input.toLowerCase(Locale.ROOT)))
+            if (source.get("title") != null)
+                candidates.add(new SuggestionItem(source.get("title").toString(), "title"));
+
+            if (source.get("tags") instanceof List<?>) {
+                ((List<?>) source.get("tags")).forEach(t -> candidates.add(new SuggestionItem(t.toString(), "tags")));
+            }
+
+            if (source.get("brand") != null)
+                candidates.add(new SuggestionItem(source.get("brand").toString(), "brand"));
+
+            if (source.get("categories") instanceof List<?>) {
+                ((List<?>) source.get("categories"))
+                        .forEach(c -> candidates.add(new SuggestionItem(c.toString(), "categories")));
+            }
+        }
+
+        // Deduplicate while preserving first occurrence
+        Map<String, SuggestionItem> uniqueMap = new LinkedHashMap<>();
+        for (SuggestionItem item : candidates) {
+            uniqueMap.putIfAbsent(item.text, item);
+        }
+
+        // Rank suggestions
+        List<String> ranked = uniqueMap.values().stream()
+                .sorted((a, b) -> Integer.compare(
+                        getMatchScore(b.text.toLowerCase(Locale.ROOT), inputLower, b.field),
+                        getMatchScore(a.text.toLowerCase(Locale.ROOT), inputLower, a.field)))
                 .limit(size)
+                .map(item -> item.text)
                 .collect(Collectors.toList());
 
-        return filteredResults;
+        return ranked;
+    }
+
+    // ---------------- Helper class for suggestions ----------------
+    private static class SuggestionItem {
+        String text;
+        String field;
+
+        SuggestionItem(String text, String field) {
+            this.text = text;
+            this.field = field;
+        }
+    }
+
+    // ---------------- Improved scoring function ----------------
+    private int getMatchScore(String text, String input, String field) {
+        int baseScore;
+
+        if (text.equals(input)) {
+            baseScore = 100; // exact match
+        } else if (text.startsWith(input)) {
+            baseScore = 75; // starts with input
+        } else if (text.contains(input)) {
+            baseScore = 50 + input.length(); // contains input
+        } else {
+            // Partial word match
+            String[] words = input.split("\\s+");
+            int matchedWords = 0;
+            for (String w : words) {
+                if (text.contains(w))
+                    matchedWords++;
+            }
+            baseScore = matchedWords * 10;
+        }
+
+        // Field boost
+        switch (field) {
+            case "title":
+                return baseScore + 20;
+            case "categories":
+                return baseScore + 15;
+            case "brand":
+                return baseScore + 10;
+            case "tags":
+                return baseScore;
+            default:
+                return baseScore;
+        }
     }
 
     public void updateFields(String indexName, String documentId, Map<String, Object> fields) {
