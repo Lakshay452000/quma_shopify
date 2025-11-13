@@ -57,7 +57,7 @@ public class SecurityConfig {
                         .requestMatchers("/user/login", "/user/register", "/user/reset-password", "/auth/**",
                                 "/products/list", "/products/search/batch",
                                 "/search/**",
-                                "/payment/webhook")
+                                "/payment/webhook", "/product-analytics/**", "/health/**")
                         .permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll() // preflight
                         .anyRequest().authenticated())

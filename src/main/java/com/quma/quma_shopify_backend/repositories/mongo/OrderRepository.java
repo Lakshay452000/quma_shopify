@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface OrderRepository extends MongoRepository<Order, String>, OrderRepositoryCustom {
@@ -20,7 +21,7 @@ public interface OrderRepository extends MongoRepository<Order, String>, OrderRe
 
     Order findByOrderIdAndUsername(String razorpayOrderId, String username);
 
-    Order findByOrderId(String orderId);
+    Optional<Order> findByOrderId(String orderId);
 
     Page<Order> findByUsername(String username, Pageable pageable);
 

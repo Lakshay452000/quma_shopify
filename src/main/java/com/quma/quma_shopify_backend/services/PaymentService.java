@@ -31,7 +31,7 @@ public class PaymentService {
 
     public InitiatePaymentResponseDTO startPayment(String orderId) {
         try {
-            Order entity = orderRepository.findById(orderId)
+            Order entity = orderRepository.findByOrderId(orderId)
                     .orElseThrow(() -> new ApiException("Order not found", 404));
 
             String receipt = entity.getOrderId();
@@ -55,7 +55,7 @@ public class PaymentService {
 
             return response;
         } catch (Exception e) {
-            log.error("Error while starting payment", e);
+            log.error("Error while starting payment", e.getMessage());
             throw new ApiException(e.getMessage(), 500);
         }
     }
@@ -107,7 +107,8 @@ public class PaymentService {
                 String receipt = razorpayService.getReceiptFromRazorpayId(razorpayOrderId);
 
                 // Find order by receipt (orderId)
-                Order order = orderRepository.findByOrderId(receipt);
+                Order order = orderRepository.findByOrderId(receipt)
+                        .orElseThrow(() -> new ApiException("Order not found", 404));
                 if (order == null) {
                     log.warn("Order not found for receipt {}", receipt);
                     return "Order not found";
