@@ -18,9 +18,7 @@ public class Wishlist {
     private String id;
     private String username;
     private String productId;
-    private String identifier; // variant identifier
-
-    // Product info needed for frontend ProductCard
+    private String identifier;
     private String title;
     private BigDecimal price;
     private String imageUrl;

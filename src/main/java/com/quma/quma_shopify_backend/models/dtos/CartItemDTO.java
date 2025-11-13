@@ -7,14 +7,13 @@ import java.util.List;
 
 @Data
 public class CartItemDTO {
-    private String productId; // productId for frontend
-    private String identifier; // variant identifier
+    private String productId;
+    private String identifier;
     private String title;
     private List<String> description;
-
+    private List<String> categories;
     private BigDecimal price;
-    private BigDecimal discountedPrice; // nullable if no discount
-
+    private BigDecimal discountedPrice;
     private String color;
     private String size;
     private String imageUrl;

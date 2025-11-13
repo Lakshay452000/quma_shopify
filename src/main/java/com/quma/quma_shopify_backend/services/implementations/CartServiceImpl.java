@@ -10,22 +10,19 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quma.quma_shopify_backend.enums.AnalyticsEventType;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.interfaces.ICartService;
-import com.quma.quma_shopify_backend.models.dtos.CartCheckoutRequestDTO;
-import com.quma.quma_shopify_backend.models.dtos.CartItemDTO;
-import com.quma.quma_shopify_backend.models.dtos.CartItemRequestDTO;
-import com.quma.quma_shopify_backend.models.dtos.CartResponseDTO;
-import com.quma.quma_shopify_backend.models.mongo.CartItemMongoDTO;
-import com.quma.quma_shopify_backend.models.mongo.Product;
-import com.quma.quma_shopify_backend.models.mongo.ProductInventoryDTO;
-import com.quma.quma_shopify_backend.models.mongo.Variant;
-import com.quma.quma_shopify_backend.repositories.mongo.CartRepository;
-import com.quma.quma_shopify_backend.repositories.mongo.InventoryRepository;
-import com.quma.quma_shopify_backend.repositories.mongo.ProductRepository;
+import com.quma.quma_shopify_backend.models.dtos.*;
+import com.quma.quma_shopify_backend.models.mongo.*;
+import com.quma.quma_shopify_backend.repositories.mongo.*;
+import com.quma.quma_shopify_backend.services.ProductAnalyticService;
 import com.quma.quma_shopify_backend.utilities.UserContext;
 
+import lombok.extern.slf4j.Slf4j;
+
 @Service
+@Slf4j
 public class CartServiceImpl implements ICartService {
 
     @Autowired
@@ -40,6 +37,9 @@ public class CartServiceImpl implements ICartService {
     @Autowired
     ObjectMapper objectMapper;
 
+    @Autowired
+    ProductAnalyticService analyticService;
+
     @Override
     public CartResponseDTO getCartItems() {
         String username = UserContext.get().getUsername();
@@ -53,7 +53,6 @@ public class CartServiceImpl implements ICartService {
         }
 
         CartResponseDTO response = objectMapper.convertValue(cart, CartResponseDTO.class);
-
         return response;
     }
 
@@ -61,7 +60,6 @@ public class CartServiceImpl implements ICartService {
     public CartResponseDTO addItem(CartItemRequestDTO item) {
         String username = UserContext.get().getUsername();
 
-        // Fetch or create user's cart
         CartItemMongoDTO cart = cartRepository.findByUsername(username);
         if (cart == null) {
             cart = new CartItemMongoDTO();
@@ -75,7 +73,6 @@ public class CartServiceImpl implements ICartService {
 
         boolean cartChanged = false;
 
-        // Check if item already exists
         Optional<CartItemDTO> existingOpt = cartItems.stream()
                 .filter(c -> c.getProductId().equals(item.getProductId()) &&
                         c.getIdentifier().equals(item.getIdentifier()))
@@ -90,20 +87,28 @@ public class CartServiceImpl implements ICartService {
                 .orElseThrow(() -> new ApiException("Variant not found", 404));
 
         newQty = Math.min(item.getQuantity(), Math.min(variant.getStock(), 5));
+        boolean isNewlyAdded = false;
+
         if (existingOpt.isPresent()) {
             CartItemDTO existing = existingOpt.get();
+            int delta = newQty - existing.getQuantity();
             existing.setQuantity(newQty);
             cartChanged = true;
+            variant.setStock(variant.getStock() - delta);
         } else {
             CartItemDTO newItem = new CartItemDTO();
             newItem.setProductId(product.getProductId());
             newItem.setIdentifier(variant.getIdentifier());
+            newItem.setCategories(product.getCategories());
             newItem.setQuantity(newQty);
             cartItems.add(newItem);
             cartChanged = true;
+            variant.setStock(variant.getStock() - newQty);
+            isNewlyAdded = true;
         }
 
-        // Build full enriched cart items (like bulkUpdate)
+        productRepository.save(product);
+
         List<CartItemDTO> enrichedItems = cartItems.stream().map(ci -> {
             Product p = productRepository.findByProductId(ci.getProductId())
                     .orElseThrow(() -> new ApiException("Product not found: " + ci.getProductId(), 404));
@@ -126,10 +131,10 @@ public class CartServiceImpl implements ICartService {
             dto.setMaterials(v.getMaterials());
             dto.setWeight(v.getWeight());
             dto.setQuantity(ci.getQuantity());
+            dto.setCategories(p.getCategories());
             return dto;
         }).collect(Collectors.toList());
 
-        // Update total amount & save
         BigDecimal totalAmount = enrichedItems.stream()
                 .map(ci -> (ci.getPrice() != null ? ci.getPrice() : BigDecimal.ZERO)
                         .multiply(BigDecimal.valueOf(ci.getQuantity())))
@@ -140,12 +145,22 @@ public class CartServiceImpl implements ICartService {
         cart.setUpdatedAt(Instant.now());
         cartRepository.save(cart);
 
-        // Build response
+        // ✅ Fire async analytics event only for newly added item
+        if (isNewlyAdded) {
+            ProductAnalyticRequest analyticRequest = new ProductAnalyticRequest();
+            analyticRequest.setUsername(username);
+            analyticRequest.setProductId(product.getProductId());
+            analyticRequest.setIdentifier(variant.getIdentifier());
+            analyticRequest.setImageUrl(variant.getImages().isEmpty() ? null : variant.getImages().get(0));
+            analyticRequest.setEventType(AnalyticsEventType.ADDED_TO_CART);
+            analyticRequest.setCategories(product.getCategories());
+            analyticService.recordEvents(List.of(analyticRequest));
+        }
+
         CartResponseDTO response = new CartResponseDTO();
         response.setCartItemDTOs(enrichedItems);
         response.setTotalAmount(totalAmount);
         response.setCartChanged(cartChanged);
-
         return response;
     }
 
@@ -154,7 +169,6 @@ public class CartServiceImpl implements ICartService {
         String username = UserContext.get().getUsername();
         CartItemMongoDTO cart = cartRepository.findByUsername(username);
         if (cart == null || CollectionUtils.isEmpty(cart.getCartItemDTOs())) {
-            // Return empty response instead of null
             CartResponseDTO emptyResponse = new CartResponseDTO();
             emptyResponse.setCartItemDTOs(Collections.emptyList());
             emptyResponse.setTotalAmount(BigDecimal.ZERO);
@@ -162,11 +176,22 @@ public class CartServiceImpl implements ICartService {
             return emptyResponse;
         }
 
-        // Remove matching item
-        cart.getCartItemDTOs().removeIf(i -> i.getProductId().equals(item.getProductId()) &&
-                i.getIdentifier().equals(item.getIdentifier()));
+        cart.getCartItemDTOs().removeIf(i -> {
+            if (i.getProductId().equals(item.getProductId()) &&
+                    i.getIdentifier().equals(item.getIdentifier())) {
+                Product p = productRepository.findByProductId(i.getProductId())
+                        .orElseThrow(() -> new ApiException("Product not found: " + i.getProductId(), 404));
+                Variant v = p.getVariants().stream()
+                        .filter(var -> var.getIdentifier().equals(i.getIdentifier()))
+                        .findFirst()
+                        .orElseThrow(() -> new ApiException("Variant not found: " + i.getIdentifier(), 404));
+                v.setStock(v.getStock() + i.getQuantity());
+                productRepository.save(p);
+                return true;
+            }
+            return false;
+        });
 
-        // If no items left → delete entire cart
         if (cart.getCartItemDTOs().isEmpty()) {
             cartRepository.delete(cart);
             CartResponseDTO emptyResponse = new CartResponseDTO();
@@ -176,11 +201,9 @@ public class CartServiceImpl implements ICartService {
             return emptyResponse;
         }
 
-        // Rebuild full frontend-compatible cart items
         List<CartItemDTO> fullCartItems = cart.getCartItemDTOs().stream().map(ci -> {
             Product product = productRepository.findByProductId(ci.getProductId())
                     .orElseThrow(() -> new ApiException("Product not found: " + ci.getProductId(), 404));
-
             Variant variant = product.getVariants().stream()
                     .filter(v -> v.getIdentifier().equals(ci.getIdentifier()))
                     .findFirst()
@@ -200,11 +223,9 @@ public class CartServiceImpl implements ICartService {
             dto.setMaterials(variant.getMaterials());
             dto.setWeight(variant.getWeight());
             dto.setQuantity(ci.getQuantity());
-
             return dto;
         }).collect(Collectors.toList());
 
-        // Update total amount & save
         BigDecimal total = fullCartItems.stream()
                 .map(ci -> (ci.getPrice() != null ? ci.getPrice() : BigDecimal.ZERO)
                         .multiply(BigDecimal.valueOf(ci.getQuantity())))
@@ -214,127 +235,141 @@ public class CartServiceImpl implements ICartService {
         cart.setUpdatedAt(Instant.now());
         cartRepository.save(cart);
 
-        // Build response
         CartResponseDTO response = new CartResponseDTO();
         response.setCartItemDTOs(fullCartItems);
         response.setTotalAmount(total);
         response.setCartChanged(false);
-
         return response;
     }
 
     @Override
     public CartResponseDTO bulkUpdate(List<CartItemRequestDTO> items) {
         String username = UserContext.get().getUsername();
+        CartItemMongoDTO cart = cartRepository.findByUsername(username);
 
         if (CollectionUtils.isEmpty(items)) {
-            // Clear cart if empty payload
-            CartItemMongoDTO existing = cartRepository.findByUsername(username);
-            if (existing != null)
-                cartRepository.delete(existing);
-
-            CartResponseDTO emptyResponse = new CartResponseDTO();
-            emptyResponse.setCartItemDTOs(Collections.emptyList());
-            emptyResponse.setTotalAmount(BigDecimal.ZERO);
-            emptyResponse.setCartChanged(false);
-            return emptyResponse;
+            if (cart == null) {
+                return CartResponseDTO.builder()
+                        .cartItemDTOs(Collections.emptyList())
+                        .totalAmount(BigDecimal.ZERO)
+                        .cartChanged(false)
+                        .build();
+            }
+            return CartResponseDTO.builder()
+                    .cartItemDTOs(cart.getCartItemDTOs())
+                    .totalAmount(cart.getTotalAmount() != null ? cart.getTotalAmount() : BigDecimal.ZERO)
+                    .cartChanged(false)
+                    .build();
         }
 
-        // Fetch or create user's cart
-        CartItemMongoDTO cart = cartRepository.findByUsername(username);
-        if (cart == null) {
+        Map<String, CartItemDTO> existingMap = new HashMap<>();
+        if (cart != null && cart.getCartItemDTOs() != null) {
+            for (CartItemDTO ci : cart.getCartItemDTOs()) {
+                existingMap.put(ci.getProductId() + "-" + ci.getIdentifier(), ci);
+            }
+        } else {
             cart = new CartItemMongoDTO();
             cart.setUsername(username);
             cart.setCartItemDTOs(new ArrayList<>());
-        } else {
-            cart.getCartItemDTOs().clear(); // overwrite with new bulk items
         }
 
         boolean cartChanged = false;
-        List<CartItemDTO> updatedItems = new ArrayList<>();
+        List<CartItemDTO> mergedItems = new ArrayList<>();
+        List<ProductAnalyticRequest> analyticsToRecord = new ArrayList<>();
+
+        Set<String> productIds = items.stream()
+                .map(CartItemRequestDTO::getProductId)
+                .collect(Collectors.toSet());
+        List<Product> products = productRepository.findAllByProductIdIn(new ArrayList<>(productIds));
+        Map<String, Product> productMap = products.stream()
+                .collect(Collectors.toMap(Product::getProductId, p -> p));
 
         for (CartItemRequestDTO incoming : items) {
+            Product product = productMap.get(incoming.getProductId());
+            if (product == null)
+                continue;
+
+            Variant variant = product.getVariants().stream()
+                    .filter(v -> v.getIdentifier().equals(incoming.getIdentifier()))
+                    .findFirst()
+                    .orElse(null);
+            if (variant == null)
+                continue;
+
             String key = incoming.getProductId() + "-" + incoming.getIdentifier();
+            int existingQty = existingMap.containsKey(key) ? existingMap.get(key).getQuantity() : 0;
 
-            // Validate inventory
-            ProductInventoryDTO productInventoryDTO = inventoryRepository.findById(key)
-                    .orElseThrow(() -> new ApiException("Product not found in inventory: " + key, 404));
-
-            int available = productInventoryDTO.getAvailableQuantity();
-            int maxQty = Math.min(5, available);
             int requestedQty = incoming.getQuantity();
+            int finalQty = Math.min(requestedQty + existingQty, Math.min(5, variant.getStock() + existingQty));
 
-            // enforce limits
-            int finalQty = Math.min(requestedQty, maxQty);
-            if (finalQty != requestedQty)
+            if (finalQty != existingQty)
                 cartChanged = true;
 
-            if (finalQty > 0) {
-                // Fetch full product details
-                Product product = productRepository.findByProductId(incoming.getProductId())
-                        .orElseThrow(() -> new ApiException("Product not found: " + incoming.getProductId(), 404));
+            variant.setStock(variant.getStock() - (finalQty - existingQty));
+            productRepository.save(product);
 
-                Variant variant = product.getVariants().stream()
-                        .filter(v -> v.getIdentifier().equals(incoming.getIdentifier()))
-                        .findFirst()
-                        .orElseThrow(() -> new ApiException("Variant not found: " + incoming.getIdentifier(), 404));
+            if (finalQty <= 0)
+                continue;
 
-                CartItemDTO dto = new CartItemDTO();
-                dto.setProductId(product.getProductId());
-                dto.setIdentifier(variant.getIdentifier());
-                dto.setTitle(product.getTitle());
-                dto.setDescription(product.getDescription());
-                dto.setPrice(variant.getPrice());
-                dto.setDiscountedPrice(variant.getDiscountedPrice());
-                dto.setColor(variant.getColor());
-                dto.setSize(variant.getSize());
-                dto.setImageUrl(variant.getImages().isEmpty() ? null : variant.getImages().get(0));
-                dto.setStock(variant.getStock());
-                dto.setMaterials(variant.getMaterials());
-                dto.setWeight(variant.getWeight());
-                dto.setQuantity(finalQty);
-
-                updatedItems.add(dto);
+            // ✅ Analytics event only if item newly added
+            if (!existingMap.containsKey(key)) {
+                ProductAnalyticRequest analyticRequest = new ProductAnalyticRequest();
+                analyticRequest.setUsername(username);
+                analyticRequest.setProductId(product.getProductId());
+                analyticRequest.setIdentifier(variant.getIdentifier());
+                analyticRequest.setImageUrl(variant.getImages().isEmpty() ? null : variant.getImages().get(0));
+                analyticRequest.setEventType(AnalyticsEventType.ADDED_TO_CART);
+                analyticRequest.setCategories(product.getCategories());
+                analyticsToRecord.add(analyticRequest);
             }
+
+            CartItemDTO dto = new CartItemDTO();
+            dto.setProductId(product.getProductId());
+            dto.setIdentifier(variant.getIdentifier());
+            dto.setTitle(product.getTitle());
+            dto.setDescription(product.getDescription());
+            dto.setPrice(variant.getPrice());
+            dto.setDiscountedPrice(variant.getDiscountedPrice());
+            dto.setColor(variant.getColor());
+            dto.setSize(variant.getSize());
+            dto.setImageUrl(variant.getImages().isEmpty() ? null : variant.getImages().get(0));
+            dto.setStock(variant.getStock());
+            dto.setMaterials(variant.getMaterials());
+            dto.setWeight(variant.getWeight());
+            dto.setQuantity(finalQty);
+            dto.setCategories(product.getCategories());
+
+            mergedItems.add(dto);
+            existingMap.remove(key);
         }
 
-        // Save updated cart
-        BigDecimal total = updatedItems.stream()
-                .map(i -> i.getPrice() != null ? i.getPrice().multiply(BigDecimal.valueOf(i.getQuantity()))
-                        : BigDecimal.ZERO)
+        mergedItems.addAll(existingMap.values());
+
+        BigDecimal total = mergedItems.stream()
+                .map(i -> (i.getPrice() != null ? i.getPrice() : BigDecimal.ZERO)
+                        .multiply(BigDecimal.valueOf(i.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        cart.setCartItemDTOs(updatedItems);
+        cart.setCartItemDTOs(mergedItems);
         cart.setTotalAmount(total);
         cart.setUpdatedAt(Instant.now());
+        cartRepository.save(cart);
 
-        if (updatedItems.isEmpty()) {
-            cartRepository.delete(cart);
-        } else {
-            cartRepository.save(cart);
+        // ✅ Fire analytics async
+        if (!analyticsToRecord.isEmpty()) {
+            analyticService.recordEvents(analyticsToRecord);
+            log.info("Triggered {} async analytics events for added-to-cart items", analyticsToRecord.size());
         }
 
-        // Build response
-        CartResponseDTO response = new CartResponseDTO();
-        response.setCartItemDTOs(updatedItems);
-        response.setTotalAmount(total);
-        response.setCartChanged(cartChanged);
-
-        return response;
+        return CartResponseDTO.builder()
+                .cartItemDTOs(mergedItems)
+                .totalAmount(total)
+                .cartChanged(cartChanged)
+                .build();
     }
 
     @Override
     public boolean checkout(CartCheckoutRequestDTO request) {
-        // Temporary reservation logic: reduce inventory for 10 min
-        // for (CartItemDTO item : request.getItems()) {
-        // String key = item.getProductId() + "-" + item.getIdentifier();
-        // int available = inventory.getOrDefault(key, 0);
-        // if (available < item.getQuantity()) {
-        // return false; // stock insufficient
-        // }
-        // inventory.put(key, available - item.getQuantity()); // reserve
-        // }
-        // cart.clear(); // clear cart after reservation
         return true;
     }
 }

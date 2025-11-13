@@ -1,21 +1,30 @@
 package com.quma.quma_shopify_backend.services;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quma.quma_shopify_backend.enums.AnalyticsEventType;
 import com.quma.quma_shopify_backend.enums.SortType;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
-import com.quma.quma_shopify_backend.models.dtos.ProductsRequestDTO;
+import com.quma.quma_shopify_backend.models.dtos.ElasticVariantsResponseDTO;
+import com.quma.quma_shopify_backend.models.dtos.ProductAnalyticRequest;
+import com.quma.quma_shopify_backend.models.dtos.ProductSearchRequestDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
+import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocumentDTO;
 import com.quma.quma_shopify_backend.models.elastic.ProductElasticResponseDocument;
 import com.quma.quma_shopify_backend.models.mongo.Product;
+import com.quma.quma_shopify_backend.models.mongo.Variant;
+import com.quma.quma_shopify_backend.models.mongo.Wishlist;
+import com.quma.quma_shopify_backend.repositories.mongo.ProductRepository;
+import com.quma.quma_shopify_backend.repositories.mongo.WishlistRepository;
 import com.quma.quma_shopify_backend.utilities.Constants;
 import com.quma.quma_shopify_backend.utilities.ElasticProductUtils;
+import com.quma.quma_shopify_backend.utilities.UserContext;
+
 import org.elasticsearch.action.update.UpdateRequest;
 
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.lucene.search.join.ScoreMode;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.get.MultiGetItemResponse;
@@ -28,10 +37,9 @@ import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.common.unit.Fuzziness;
 import org.elasticsearch.search.SearchHit;
-import org.elasticsearch.search.aggregations.bucket.nested.Nested;
-import org.elasticsearch.search.aggregations.bucket.nested.NestedAggregationBuilder;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.elasticsearch.search.collapse.CollapseBuilder;
 import org.elasticsearch.search.sort.SortOrder;
 import org.elasticsearch.xcontent.XContentType;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +47,7 @@ import org.springframework.stereotype.Service;
 import org.elasticsearch.index.query.*;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -50,34 +59,88 @@ public class ElasticSearchService {
 
     @Autowired
     private RestHighLevelClient restHighLevelClient;
-
     @Autowired
     private ObjectMapper objectMapper;
+    @Autowired
+    private ProductRepository productRepository;
+    @Autowired
+    private WishlistRepository wishlistRepository;
+    @Autowired
+    private ProductAnalyticService analyticService;
 
-    public ProductElasticDocument getProductElasticDocuments(Product product) {
+    public ProductElasticDocument getProductElasticDocument(Product product) {
         ProductElasticDocument doc = objectMapper.convertValue(product, ProductElasticDocument.class);
         return doc;
     }
 
-    public void indexProducts(List<ProductElasticDocument> products) throws Exception {
+    public void indexProducts(List<String> productIds) {
         try {
+            // 1️⃣ Fetch products from Mongo
+            List<Product> products = productRepository.findAllByProductIdIn(productIds);
+
+            if (products.isEmpty()) {
+                log.warn("No products found for IDs: {}", productIds);
+                return;
+            }
+
+            // 2️⃣ Prepare bulk request
             BulkRequest bulkRequest = new BulkRequest();
-            for (ProductElasticDocument doc : products) {
-                String json = objectMapper.writeValueAsString(doc);
-                IndexRequest request = new IndexRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME)
-                        .id(doc.getId()) // This should be productId-variantId
-                        .source(json, XContentType.JSON);
-                bulkRequest.add(request);
+
+            for (Product product : products) {
+                List<Variant> variants = product.getVariants();
+                if (variants == null || variants.isEmpty()) {
+                    log.warn("Product {} has no variants, skipping.", product.getProductId());
+                    continue;
+                }
+
+                // 3️⃣ Create ES doc for each variant
+                for (int i = 0; i < variants.size(); i++) {
+                    Variant variant = variants.get(i);
+                    ProductElasticDocument doc = new ProductElasticDocument();
+                    doc.setProductId(product.getProductId());
+                    doc.setIdentifier(variant.getIdentifier());
+                    doc.setTitle(product.getTitle());
+                    doc.setBrand(product.getBrand());
+                    doc.setCategories(product.getCategories());
+                    doc.setTypes(product.getTypes());
+                    doc.setTags(product.getTags());
+                    doc.setColor(variant.getColor());
+                    doc.setSize(variant.getSize());
+                    doc.setWeight(variant.getWeight());
+                    doc.setMaterials(variant.getMaterials());
+                    doc.setImages(variant.getImages());
+                    doc.setPrice(variant.getPrice());
+                    doc.setDiscountedPrice(variant.getDiscountedPrice());
+                    doc.setAverageRating(product.getAverageRating());
+                    doc.setTotalBuyers(product.getTotalBuyers());
+                    doc.setIsActive(product.getIsActive());
+                    doc.setCreatedAt(product.getCreatedAt());
+                    doc.setUpdatedAt(product.getUpdatedAt());
+
+                    String json = objectMapper.writeValueAsString(doc);
+
+                    IndexRequest indexRequest = new IndexRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME)
+                            .id(product.getProductId() + "-" + variant.getIdentifier()) // ✅ unique per variant
+                            .source(json, XContentType.JSON);
+
+                    bulkRequest.add(indexRequest);
+                }
             }
-            BulkResponse bulkResponse = restHighLevelClient.bulk(bulkRequest, RequestOptions.DEFAULT);
-            if (bulkResponse.hasFailures()) {
-                log.error("Some documents failed to index: {}", bulkResponse.buildFailureMessage());
-            } else {
-                log.info("Indexed {} documents to Elastic", products.size());
+
+            // 4️⃣ Bulk index to Elasticsearch
+            if (bulkRequest.numberOfActions() > 0) {
+                BulkResponse response = restHighLevelClient.bulk(bulkRequest, RequestOptions.DEFAULT);
+                if (response.hasFailures()) {
+                    log.error("Bulk indexing completed with failures: {}", response.buildFailureMessage());
+                } else {
+                    log.info("Successfully indexed {} variant documents to Elasticsearch.",
+                            bulkRequest.numberOfActions());
+                }
             }
+
         } catch (Exception e) {
-            log.error("Error indexing products to Elastic: {}", e.getMessage());
-            throw e;
+            log.error("Error during bulk indexing: {}", e.getMessage(), e);
+            throw new ApiException("Failed to index product variants in Elasticsearch", 500);
         }
     }
 
@@ -105,7 +168,8 @@ public class ElasticSearchService {
         return products;
     }
 
-    public ProductElasticResponseDocument searchProducts(ProductsRequestDTO request) throws ApiException, IOException {
+    public ProductElasticResponseDocument searchProducts(ProductSearchRequestDTO request)
+            throws ApiException, IOException {
         try {
             String normalized = normalizeQuery(request.getSearchTerm());
 
@@ -115,53 +179,37 @@ public class ElasticSearchService {
 
             if (StringUtils.isNotBlank(normalized)) {
                 bool.must(QueryBuilders.multiMatchQuery(normalized,
-                        "title", "description", "categories", "types", "brand", "tags",
-                        "title.ngram", "description.ngram", "tags.ngram")
+                        "title", "categories", "types", "brand", "tags",
+                        "title.ngram", "categories.ngram", "types.ngram", "brand.ngram", "tags.ngram")
                         .type(MultiMatchQueryBuilder.Type.BEST_FIELDS)
                         .fuzziness(Fuzziness.AUTO));
             }
 
-            // ---------- Apply user-selected filters (AND between fields, OR within same
-            // field) ----------
+            // ---------- Apply user-selected filters ----------
             if (request.getFilters() != null && !request.getFilters().isEmpty()) {
                 BoolQueryBuilder filterBool = QueryBuilders.boolQuery();
-
-                Map<String, List<String>> normalizedFilters = new HashMap<>();
                 request.getFilters().forEach((k, v) -> {
                     if (v != null && !v.isEmpty()) {
                         String normalizedKey = Character.toLowerCase(k.charAt(0)) + k.substring(1);
-                        normalizedFilters.put(normalizedKey, v);
+                        BoolQueryBuilder perFieldBool = QueryBuilders.boolQuery();
+                        v.forEach(val -> perFieldBool.should(QueryBuilders.termQuery(normalizedKey, val)));
+                        filterBool.must(perFieldBool);
                     }
                 });
-                for (Map.Entry<String, List<String>> entry : normalizedFilters.entrySet()) {
-                    String field = entry.getKey();
-                    List<String> values = entry.getValue();
-
-                    if (values != null && !values.isEmpty()) {
-                        BoolQueryBuilder perFieldBool = QueryBuilders.boolQuery();
-                        values.forEach(v -> perFieldBool.should(QueryBuilders.termQuery(field, v)));
-
-                        if (ElasticProductUtils.getNestedFilters().contains(field)) {
-                            filterBool.must(QueryBuilders.nestedQuery("variants", perFieldBool, ScoreMode.None));
-                        } else {
-                            filterBool.must(perFieldBool);
-                        }
-                    }
-                }
-
                 bool.filter(filterBool);
             }
 
             boolean isFirstPage = request.isInitialLoad();
 
-            // ---------- Paginated search query ----------
+            // ---------- Paginated search query with collapse ----------
             SearchSourceBuilder ssb = new SearchSourceBuilder()
                     .query(bool)
                     .size(request.getPageSize())
                     .sort("_score", SortOrder.DESC)
                     .sort(StringUtils.defaultIfBlank(request.getSortBy(), "updatedAt"),
                             request.getSortType() == SortType.ASC ? SortOrder.ASC : SortOrder.DESC)
-                    .sort("_id", SortOrder.ASC);
+                    .sort("_id", SortOrder.ASC)
+                    .collapse(new CollapseBuilder("productId"));
 
             if (request.getSortValues() != null && request.getSortValues().length > 0) {
                 ssb.searchAfter(request.getSortValues());
@@ -171,101 +219,87 @@ public class ElasticSearchService {
             SearchResponse resp = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
 
             // ---------- Parse hits ----------
-            List<ProductElasticDocument> products = new ArrayList<>();
+            List<ProductElasticDocumentDTO> products = new ArrayList<>();
+            List<String> productIds = new ArrayList<>();
             Object[] lastSortValues = null;
             SearchHit[] hits = resp.getHits().getHits();
-            if (hits == null || hits.length == 0) {
-                ProductElasticResponseDocument empty = new ProductElasticResponseDocument();
-                empty.setProducts(Collections.emptyList());
-                empty.setSortValues(null);
-                empty.setFilters(Collections.emptyMap());
-                empty.setQuickFilters(Collections.emptyMap());
-                return empty;
+            if (hits != null && hits.length > 0) {
+                for (SearchHit hit : hits) {
+                    ProductElasticDocumentDTO p = objectMapper.convertValue(hit.getSourceAsMap(),
+                            ProductElasticDocumentDTO.class);
+                    lastSortValues = hit.getSortValues();
+                    products.add(p);
+                    productIds.add(p.getProductId() + "$" + p.getIdentifier());
+                }
             }
 
-            for (SearchHit hit : resp.getHits().getHits()) {
-                ProductElasticDocument p = objectMapper.convertValue(hit.getSourceAsMap(),
-                        ProductElasticDocument.class);
-                p.setId(hit.getId());
-                lastSortValues = hit.getSortValues();
-                products.add(p);
+            if (StringUtils.isNotBlank(normalized)) {
+                List<ProductAnalyticRequest> analyticsToRecord = products.stream()
+                        .map(p -> ProductAnalyticRequest.builder()
+                                .username(UserContext.get().getUsername())
+                                .productId(p.getProductId())
+                                .identifier(p.getIdentifier())
+                                .imageUrl(p.getImages().get(0))
+                                .categories(p.getCategories())
+                                .eventType(AnalyticsEventType.SEARCHED)
+                                .build())
+                        .toList();
+
+                analyticService.recordEvents(analyticsToRecord);
             }
+            String username = UserContext.get().getUsername();
+            List<Wishlist> wishlists = wishlistRepository.findAllByUsernameAndProductIdIn(username, productIds);
+
+            Set<String> wishlistedIds = wishlists.stream()
+                    .map(Wishlist::getProductId)
+                    .collect(Collectors.toSet());
+
+            products.forEach(p -> p.setWishlisted(wishlistedIds.contains(p.getProductId() + "$" + p.getIdentifier())));
 
             ProductElasticResponseDocument out = new ProductElasticResponseDocument();
             out.setProducts(products);
             out.setSortValues(lastSortValues);
 
-            // ---------- Aggregations (filters & quick filters) ----------
+            // ---------- Aggregations (filters + variant info) ----------
             if (isFirstPage) {
-                // Aggregation query ignores selected filters, uses only search term
                 BoolQueryBuilder aggBool = QueryBuilders.boolQuery();
                 if (StringUtils.isNotBlank(normalized)) {
                     aggBool.must(QueryBuilders.multiMatchQuery(normalized,
-                            "title", "description", "categories", "types", "brand", "tags",
-                            "title.ngram", "description.ngram", "tags.ngram")
+                            "title", "categories", "types", "brand", "tags",
+                            "title.ngram", "categories.ngram", "types.ngram", "brand.ngram", "tags.ngram")
                             .type(MultiMatchQueryBuilder.Type.BEST_FIELDS)
                             .fuzziness(Fuzziness.AUTO));
                 }
 
                 SearchSourceBuilder aggSSB = new SearchSourceBuilder().query(aggBool).size(0);
 
-                // Top-level filters
-                for (String field : ElasticProductUtils.getTopLevelFilters()) {
+                // ---------- Top-level + variant filters ----------
+                List<String> filterFields = new ArrayList<>(ElasticProductUtils.getTopLevelFilters());
+                for (String field : filterFields) {
                     aggSSB.aggregation(AggregationBuilders.terms(field + "_agg")
                             .field(field)
-                            .size(100)
-                            .missing("N/A"));
+                            .size(100));
                 }
-
-                // Nested variant filters
-                NestedAggregationBuilder variantsNestedAgg = AggregationBuilders.nested("variants_nested", "variants");
-                for (String variantField : ElasticProductUtils.getNestedFilters()) {
-                    variantsNestedAgg.subAggregation(AggregationBuilders.terms(variantField + "_agg")
-                            .field("variants." + variantField)
-                            .size(100)
-                            .missing("N/A"));
-                }
-                aggSSB.aggregation(variantsNestedAgg);
 
                 SearchRequest aggRequest = new SearchRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME).source(aggSSB);
                 SearchResponse aggResp = restHighLevelClient.search(aggRequest, RequestOptions.DEFAULT);
 
-                // ---------- Parse aggregations ----------
+                // Parse aggregations
                 LinkedHashMap<String, LinkedHashSet<String>> filtersSet = new LinkedHashMap<>();
+                for (String field : filterFields) {
+                    if ("tags".equalsIgnoreCase(field) || "images".equalsIgnoreCase(field))
+                        continue;
 
-                // Top-level fields
-                for (String field : ElasticProductUtils.getTopLevelFilters()) {
                     LinkedHashSet<String> values = new LinkedHashSet<>();
                     Terms agg = aggResp.getAggregations().get(field + "_agg");
                     if (agg != null) {
                         agg.getBuckets().forEach(bucket -> {
                             String key = bucket.getKeyAsString();
-                            if (key != null && !key.isEmpty() && !"N/A".equalsIgnoreCase(key))
+                            if (key != null && !key.isEmpty())
                                 values.add(key);
                         });
                     }
                     filtersSet.put(field, values);
-                }
-
-                // Nested variant fields
-                Nested variantsNested = aggResp.getAggregations().get("variants_nested");
-                if (variantsNested != null) {
-                    Map<String, String> variantAggMap = Map.of(
-                            "color", "color_agg",
-                            "size", "size_agg",
-                            "materials", "materials_agg");
-                    for (String field : ElasticProductUtils.getNestedFilters()) {
-                        LinkedHashSet<String> values = new LinkedHashSet<>();
-                        Terms agg = variantsNested.getAggregations().get(variantAggMap.get(field));
-                        if (agg != null) {
-                            agg.getBuckets().forEach(bucket -> {
-                                String key = bucket.getKeyAsString();
-                                if (key != null && !key.isEmpty() && !"N/A".equalsIgnoreCase(key))
-                                    values.add(key);
-                            });
-                        }
-                        filtersSet.put(field, values);
-                    }
                 }
 
                 // Remove search term from filters
@@ -274,31 +308,25 @@ public class ElasticSearchService {
                     filtersSet.values().forEach(set -> set.removeIf(v -> v.equalsIgnoreCase(searchTermLower)));
                 }
 
+                // ---------- Final filters & quickFilters ----------
                 Map<String, List<String>> filters = new LinkedHashMap<>();
                 filtersSet.forEach((k, v) -> {
-                    int idx = k.indexOf(".keyword");
-                    String cleanKey = (idx != -1) ? k.substring(0, idx) : k;
-
-                    if (!cleanKey.isEmpty()) {
-                        // Capitalize first letter
+                    String cleanKey = k.replaceAll("\\.keyword$", ""); // remove .keyword if present
+                    if (!cleanKey.isEmpty())
                         cleanKey = Character.toUpperCase(cleanKey.charAt(0)) + cleanKey.substring(1);
-                    }
-
                     filters.put(cleanKey, new ArrayList<>(v));
                 });
                 out.setFilters(filters);
 
-                // Quick filters too
                 Map<String, List<String>> quickFilters = new LinkedHashMap<>();
                 for (String key : filtersSet.keySet()) {
-                    String capKey = Character.toUpperCase(key.charAt(0)) + key.substring(1);
+                    String cleanKey = key.replaceAll("\\.keyword$", "");
+                    cleanKey = Character.toUpperCase(cleanKey.charAt(0)) + cleanKey.substring(1);
                     List<String> values = new ArrayList<>(filtersSet.get(key));
-                    if (!values.isEmpty()) {
-                        quickFilters.put(capKey, values.stream().limit(7).collect(Collectors.toList()));
-                    }
+                    if (!values.isEmpty())
+                        quickFilters.put(cleanKey, values.stream().limit(7).toList());
                 }
                 out.setQuickFilters(quickFilters);
-
             }
 
             return out;
@@ -327,20 +355,27 @@ public class ElasticSearchService {
 
         String inputLower = input.toLowerCase(Locale.ROOT);
 
-        // Multi-match query on ngram fields
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
-        sourceBuilder.query(QueryBuilders.multiMatchQuery(inputLower,
-                "title.ngram", "tags.ngram", "brand.ngram", "categories.ngram")
-                .type(MultiMatchQueryBuilder.Type.PHRASE_PREFIX));
-        sourceBuilder.size(100); // fetch more for proper ranking
-        sourceBuilder.fetchSource(new String[] { "title", "tags", "brand", "categories" }, null);
+        sourceBuilder.query(
+                QueryBuilders.multiMatchQuery(inputLower,
+                        "title.ngram", "title.fuzzy",
+                        "tags.ngram", "tags.fuzzy",
+                        "brand.ngram", "brand.fuzzy",
+                        "categories.ngram", "categories.fuzzy",
+                        "types.ngram", "types.fuzzy")
+                        .type(MultiMatchQueryBuilder.Type.BEST_FIELDS)
+                        .fuzziness(Fuzziness.AUTO)
+                        .prefixLength(1)
+                        .operator(Operator.OR));
+
+        sourceBuilder.size(100);
+        sourceBuilder.fetchSource(new String[] { "title", "tags", "brand", "categories", "types" }, null);
 
         SearchRequest searchRequest = new SearchRequest(indexName);
         searchRequest.source(sourceBuilder);
 
         SearchResponse response = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
 
-        // Collect suggestions with field info
         List<SuggestionItem> candidates = new ArrayList<>();
         for (SearchHit hit : response.getHits()) {
             Map<String, Object> source = hit.getSourceAsMap();
@@ -359,27 +394,27 @@ public class ElasticSearchService {
                 ((List<?>) source.get("categories"))
                         .forEach(c -> candidates.add(new SuggestionItem(c.toString(), "categories")));
             }
+            if (source.get("types") instanceof List<?>) {
+                ((List<?>) source.get("types")).forEach(t -> candidates.add(new SuggestionItem(t.toString(), "types")));
+            }
         }
 
-        // Deduplicate while preserving first occurrence
+        // Deduplicate
         Map<String, SuggestionItem> uniqueMap = new LinkedHashMap<>();
         for (SuggestionItem item : candidates) {
             uniqueMap.putIfAbsent(item.text, item);
         }
 
-        // Rank suggestions
-        List<String> ranked = uniqueMap.values().stream()
+        // Rank and return top suggestions
+        return uniqueMap.values().stream()
                 .sorted((a, b) -> Integer.compare(
                         getMatchScore(b.text.toLowerCase(Locale.ROOT), inputLower, b.field),
                         getMatchScore(a.text.toLowerCase(Locale.ROOT), inputLower, a.field)))
                 .limit(size)
                 .map(item -> item.text)
                 .collect(Collectors.toList());
-
-        return ranked;
     }
 
-    // ---------------- Helper class for suggestions ----------------
     private static class SuggestionItem {
         String text;
         String field;
@@ -390,28 +425,24 @@ public class ElasticSearchService {
         }
     }
 
-    // ---------------- Improved scoring function ----------------
+    // ---------------- Improved fuzzy + prefix scoring ----------------
     private int getMatchScore(String text, String input, String field) {
+        int distance = levenshteinDistance(text, input);
         int baseScore;
 
-        if (text.equals(input)) {
-            baseScore = 100; // exact match
-        } else if (text.startsWith(input)) {
-            baseScore = 75; // starts with input
-        } else if (text.contains(input)) {
-            baseScore = 50 + input.length(); // contains input
-        } else {
-            // Partial word match
-            String[] words = input.split("\\s+");
-            int matchedWords = 0;
-            for (String w : words) {
-                if (text.contains(w))
-                    matchedWords++;
-            }
-            baseScore = matchedWords * 10;
-        }
+        if (text.equals(input))
+            baseScore = 100; // exact
+        else if (text.startsWith(input))
+            baseScore = 85; // prefix
+        else if (distance <= 1)
+            baseScore = 75; // close fuzzy
+        else if (distance == 2)
+            baseScore = 60; // looser fuzzy
+        else if (text.contains(input))
+            baseScore = 50; // substring
+        else
+            baseScore = Math.max(10, 30 - distance * 5);
 
-        // Field boost
         switch (field) {
             case "title":
                 return baseScore + 20;
@@ -419,11 +450,28 @@ public class ElasticSearchService {
                 return baseScore + 15;
             case "brand":
                 return baseScore + 10;
-            case "tags":
-                return baseScore;
             default:
                 return baseScore;
         }
+    }
+
+    // ---------------- Helper for fuzzy distance ----------------
+    private int levenshteinDistance(String a, String b) {
+        int[][] dp = new int[a.length() + 1][b.length() + 1];
+        for (int i = 0; i <= a.length(); i++) {
+            for (int j = 0; j <= b.length(); j++) {
+                if (i == 0)
+                    dp[i][j] = j;
+                else if (j == 0)
+                    dp[i][j] = i;
+                else
+                    dp[i][j] = Math.min(
+                            Math.min(dp[i - 1][j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1),
+                                    dp[i - 1][j] + 1),
+                            dp[i][j - 1] + 1);
+            }
+        }
+        return dp[a.length()][b.length()];
     }
 
     public void updateFields(String indexName, String documentId, Map<String, Object> fields) {
@@ -438,6 +486,69 @@ public class ElasticSearchService {
             // Log error; in real systems, you might push to a retry queue
             System.err.println("Failed to update Elastic document " + documentId + ": " + e.getMessage());
         }
+    }
+
+    public List<ElasticVariantsResponseDTO> getVariantsByBaseProductId(String baseProductId) throws IOException {
+        if (StringUtils.isBlank(baseProductId)) {
+            return Collections.emptyList();
+        }
+
+        // ✅ Define which fields to fetch from _source
+        String[] includedFields = {
+                "productId",
+                "baseProductId",
+                "price",
+                "discountedPrice",
+                "images",
+                "color"
+        };
+
+        // ✅ Build query
+        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder()
+                .query(QueryBuilders.boolQuery()
+                        .filter(QueryBuilders.termQuery("baseProductId", baseProductId))
+                        .filter(QueryBuilders.termQuery("isActive", true)))
+                .size(50)
+                .fetchSource(includedFields, new String[] {});
+
+        SearchRequest searchRequest = new SearchRequest(Constants.ELASTIC_PRODUCT_INDEX_NAME)
+                .source(sourceBuilder);
+
+        SearchResponse response = restHighLevelClient.search(searchRequest, RequestOptions.DEFAULT);
+
+        List<ElasticVariantsResponseDTO> variants = new ArrayList<>();
+
+        for (SearchHit hit : response.getHits().getHits()) {
+            Map<String, Object> src = hit.getSourceAsMap();
+
+            ElasticVariantsResponseDTO dto = new ElasticVariantsResponseDTO();
+            dto.setProductId((String) src.get("productId"));
+            dto.setBaseProductId((String) src.get("baseProductId"));
+            dto.setColor((String) src.get("color"));
+
+            // ✅ Convert numeric fields safely
+            Object price = src.get("price");
+            if (price != null) {
+                dto.setPrice(new BigDecimal(price.toString()));
+            }
+
+            Object discountedPrice = src.get("discountedPrice");
+            if (discountedPrice != null) {
+                dto.setDiscountedPrice(new BigDecimal(discountedPrice.toString()));
+            }
+
+            // ✅ Extract first image only
+            Object images = src.get("images");
+            if (images instanceof List<?> list && !list.isEmpty()) {
+                dto.setImage(list.get(0).toString());
+            } else if (images instanceof String) {
+                dto.setImage(images.toString());
+            }
+
+            variants.add(dto);
+        }
+
+        return variants;
     }
 
 }

@@ -5,8 +5,10 @@ import com.quma.quma_shopify_backend.repositories.mongo.ReviewRepository;
 import com.quma.quma_shopify_backend.services.implementations.UserService;
 import com.quma.quma_shopify_backend.repositories.mongo.ProductRepository;
 import com.quma.quma_shopify_backend.utilities.UserContext;
+import com.quma.quma_shopify_backend.models.dtos.ProductAnalyticRequest;
 import com.quma.quma_shopify_backend.models.dtos.ReviewRequestDTO;
 import com.quma.quma_shopify_backend.interfaces.IProductRatingAggregate;
+import com.quma.quma_shopify_backend.enums.AnalyticsEventType;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
 import com.quma.quma_shopify_backend.models.dtos.ReviewResponseDTO;
 import com.quma.quma_shopify_backend.utilities.Constants;
@@ -18,6 +20,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Map;
 
 @Service
@@ -29,6 +33,7 @@ public class ReviewService {
     private final OrderService orderService;
     private final ElasticSearchService elasticSearchService;
     private final UserService userService;
+    private final ProductAnalyticService analyticService;
 
     public Review addOrUpdateReview(ReviewRequestDTO request) {
         String username = UserContext.get().getUsername();
@@ -59,6 +64,17 @@ public class ReviewService {
                 });
 
         updateProductRating(request.productId());
+        productRepository.findByProductId(request.productId()).ifPresent(product -> {
+            var analyticRequest = new ProductAnalyticRequest();
+            analyticRequest.setUsername(username);
+            analyticRequest.setProductId(product.getProductId());
+            analyticRequest.setIdentifier(product.getVariants().get(0).getIdentifier());
+            analyticRequest.setImageUrl(product.getVariants().get(0).getImages().get(0));
+            analyticRequest.setCategories(product.getCategories());
+            analyticRequest.setEventType(AnalyticsEventType.RATED);
+            analyticService.recordEvents(Collections.singletonList(analyticRequest)); // async
+        });
+
         return review;
     }
 

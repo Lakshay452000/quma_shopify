@@ -9,8 +9,6 @@ import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
 
-import com.quma.quma_shopify_backend.models.mongo.Variant;
-
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -28,54 +26,67 @@ public class ProductElasticDocument {
     private String productId;
 
     @Field(type = FieldType.Keyword)
-    private String ownerId;
+    private String identifier;
 
+    // --- Product Info ---
     @Field(type = FieldType.Text)
     private String title;
-
-    @Field(type = FieldType.Keyword)
-    private List<String> categories; // changed from String
-
-    @Field(type = FieldType.Keyword)
-    private List<String> types; // changed from String
-
-    @Field(type = FieldType.Keyword)
-    private String brand;
 
     @Field(type = FieldType.Text)
     private List<String> description;
 
-    @Field(type = FieldType.Double)
-    private BigDecimal discountedPrice;
+    @Field(type = FieldType.Keyword)
+    private String brand;
 
-    @Field(type = FieldType.Text)
+    @Field(type = FieldType.Keyword)
+    private List<String> categories;
+
+    @Field(type = FieldType.Keyword)
+    private List<String> types;
+
+    @Field(type = FieldType.Keyword)
     private List<String> tags;
 
     @Field(type = FieldType.Keyword)
     private List<String> images;
 
+    // --- Variant & Filter Info ---
+    @Field(type = FieldType.Keyword)
+    private String color;
+
+    @Field(type = FieldType.Keyword)
+    private String size;
+
+    @Field(type = FieldType.Double)
+    private Double weight;
+
+    @Field(type = FieldType.Keyword)
+    private List<String> materials;
+
+    // --- Display Info ---
+    @Field(type = FieldType.Double)
+    private BigDecimal price;
+
+    @Field(type = FieldType.Double)
+    private BigDecimal discountedPrice;
+
     @Field(type = FieldType.Double)
     private Double averageRating;
 
-    @Field(type = FieldType.Integer)
-    private Integer totalReviews;
+    @Field(type = FieldType.Long)
+    private Long totalBuyers;
 
-    @Field(type = FieldType.Integer)
-    private Integer totalBuyers;
+    @Field(type = FieldType.Boolean)
+    private Boolean isActive;
 
+    // --- Meta Info ---
     @Field(type = FieldType.Date)
     private Instant createdAt;
 
     @Field(type = FieldType.Date)
     private Instant updatedAt;
 
+    // --- Sorting Support ---
     @Transient
     private Object[] sortValues;
-
-    @Field(type = FieldType.Nested, includeInParent = true)
-    private List<Variant> variants;
-
-    @Field(type = FieldType.Boolean)
-    private Boolean isActive;
-
 }

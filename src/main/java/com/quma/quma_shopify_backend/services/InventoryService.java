@@ -3,7 +3,7 @@ package com.quma.quma_shopify_backend.services;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.quma.quma_shopify_backend.models.mongo.ProductInventoryDTO;
+import com.quma.quma_shopify_backend.models.mongo.ProductInventory;
 import com.quma.quma_shopify_backend.models.mongo.ProductInventoryRequestDTO;
 import com.quma.quma_shopify_backend.repositories.mongo.InventoryRepository;
 
@@ -13,20 +13,27 @@ public class InventoryService {
     @Autowired
     InventoryRepository inventoryRepository;
 
-    public void addItems(ProductInventoryRequestDTO productInventoryRequestDTO) {
-        if (productInventoryRequestDTO == null)
+    public void addOrUpdateInventory(ProductInventoryRequestDTO dto) {
+        if (dto == null || dto.getProductId() == null)
             return;
 
-        // Generate ID as combination of productId and identifier
-        String id = productInventoryRequestDTO.getProductId() + "-" + productInventoryRequestDTO.getIdentifier();
+        // Fetch existing inventory by productId, or create new
+        ProductInventory entity = inventoryRepository.findByProductId(dto.getProductId())
+                .orElseGet(ProductInventory::new);
 
-        // Convert DTO to Mongo entity
-        ProductInventoryDTO entity = new ProductInventoryDTO();
-        entity.setId(id);
-        entity.setProductId(productInventoryRequestDTO.getProductId());
-        entity.setIdentifier(productInventoryRequestDTO.getIdentifier());
-        entity.setAvailableQuantity(productInventoryRequestDTO.getAvailableQuantity());
-        entity.setPrice(productInventoryRequestDTO.getPrice());
+        // Set productId (required)
+        entity.setProductId(dto.getProductId());
+
+        // Update only if fields are not null
+        if (dto.getAvailableQuantity() != null) {
+            entity.setAvailableQuantity(dto.getAvailableQuantity());
+        }
+        if (dto.getPrice() != null) {
+            entity.setPrice(dto.getPrice());
+        }
+        if (dto.getDiscountedPrice() != null) {
+            entity.setDiscountedPrice(dto.getDiscountedPrice());
+        }
 
         // Save to Mongo
         inventoryRepository.save(entity);

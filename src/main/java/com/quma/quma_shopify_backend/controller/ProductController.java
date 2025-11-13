@@ -1,10 +1,8 @@
 package com.quma.quma_shopify_backend.controller;
 
-import com.quma.quma_shopify_backend.models.dtos.ProductsRequestDTO;
-import com.quma.quma_shopify_backend.models.elastic.ProductElasticDocument;
-import com.quma.quma_shopify_backend.models.mongo.Product;
+import com.quma.quma_shopify_backend.models.dtos.ProductRequestDTO;
+import com.quma.quma_shopify_backend.models.dtos.ProductSaveRequestDTO;
 import com.quma.quma_shopify_backend.services.ProductService;
-import com.quma.quma_shopify_backend.utilities.UtilityFunctions;
 
 import jakarta.validation.Valid;
 
@@ -15,8 +13,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
-
 @RestController
 @RequestMapping("/products")
 public class ProductController {
@@ -25,11 +21,9 @@ public class ProductController {
     private ProductService productService;
 
     @PostMapping("/save")
-    public ResponseEntity<String> registerProduct(@Valid @RequestBody Product product) {
+    public ResponseEntity<String> registerProduct(@Valid @RequestBody ProductSaveRequestDTO productSaveRequestDTO) {
         try {
-            String productId = "PRODUCT-" + UtilityFunctions.getRandomId();
-            product.setProductId(productId);
-            productService.saveProduct(product);
+            productService.saveProduct(productSaveRequestDTO);
             return ResponseEntity.ok("Product saved and indexed successfully.");
         } catch (Exception e) {
             return ResponseEntity.status(500).body("Error while saving product. Product was not added");
@@ -37,7 +31,7 @@ public class ProductController {
     }
 
     @PostMapping("/list")
-    public ResponseEntity<?> getProductsList(@RequestBody ProductsRequestDTO productsRequestDTO) {
+    public ResponseEntity<?> getProductsList(@RequestBody ProductRequestDTO productsRequestDTO) {
         try {
             return ResponseEntity.ok(productService.getProductList(productsRequestDTO.getProductIds()));
         } catch (Exception e) {
@@ -45,9 +39,4 @@ public class ProductController {
         }
     }
 
-    @PostMapping("/search/batch")
-    public ResponseEntity<List<ProductElasticDocument>> searchProductsByIds(
-            @RequestBody ProductsRequestDTO productsRequestDTO) throws Exception {
-        return ResponseEntity.ok(productService.searchProductsByIds(productsRequestDTO.getProductIds()));
-    }
 }

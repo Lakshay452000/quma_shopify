@@ -7,8 +7,12 @@ import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.jedis.JedisClientConfiguration;
 import org.springframework.data.redis.connection.jedis.JedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
+
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.PropertyAccessor;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Configuration
 public class RedisConfig {
@@ -34,7 +38,7 @@ public class RedisConfig {
         config.setPassword(password);
 
         JedisClientConfiguration clientConfig = JedisClientConfiguration.builder()
-                .useSsl()  // enable TLS/SSL
+                .useSsl() // enable TLS/SSL
                 .build();
 
         return new JedisConnectionFactory(config, clientConfig);
@@ -44,8 +48,21 @@ public class RedisConfig {
     public RedisTemplate<String, Object> redisTemplate(JedisConnectionFactory factory) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(factory);
+
+        // ✅ Use plain JSON serializer without @class metadata
+        Jackson2JsonRedisSerializer<Object> serializer = new Jackson2JsonRedisSerializer<>(Object.class);
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
+        mapper.deactivateDefaultTyping(); // 👈 disables @class info
+        serializer.setObjectMapper(mapper);
+
         template.setKeySerializer(new StringRedisSerializer());
-        template.setValueSerializer(new GenericJackson2JsonRedisSerializer()); // 👈 supports any object
+        template.setHashKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(serializer);
+        template.setHashValueSerializer(serializer);
+        template.afterPropertiesSet();
+
         return template;
     }
+
 }

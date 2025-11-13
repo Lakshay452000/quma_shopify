@@ -1,6 +1,7 @@
 package com.quma.quma_shopify_backend.services;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quma.quma_shopify_backend.enums.AnalyticsEventType;
 import com.quma.quma_shopify_backend.enums.OrderPaymentStatus;
 import com.quma.quma_shopify_backend.enums.OrderShipmentStatus;
 import com.quma.quma_shopify_backend.enums.OrderStatus;
@@ -9,6 +10,7 @@ import com.quma.quma_shopify_backend.models.dtos.CouponApplyResponseDTO;
 import com.quma.quma_shopify_backend.models.dtos.CreateOrderRequestDTO;
 import com.quma.quma_shopify_backend.models.dtos.OrderResponseDTO;
 import com.quma.quma_shopify_backend.models.dtos.PagedOrderResponseDTO;
+import com.quma.quma_shopify_backend.models.dtos.ProductAnalyticRequest;
 import com.quma.quma_shopify_backend.models.mongo.CartItemMongoDTO;
 import com.quma.quma_shopify_backend.models.mongo.Order;
 import com.quma.quma_shopify_backend.models.mongo.OrderItemDTO;
@@ -19,6 +21,7 @@ import com.quma.quma_shopify_backend.utilities.UserContext;
 import com.quma.quma_shopify_backend.utilities.UtilityFunctions;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -36,6 +39,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class OrderService {
 
     private final OrderRepository orderRepository;
@@ -49,6 +53,8 @@ public class OrderService {
     private final ShippingService shippingService;
 
     private final AddressRepository addressRepository;
+
+    private final ProductAnalyticService analyticService;
 
     /**
      * Create an order for the current user from their cart.
@@ -83,7 +89,6 @@ public class OrderService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         if (couponCode != null && !couponCode.isEmpty()) {
-            // Apply coupon if provided
             CouponApplyResponseDTO coupon = couponService.applyCoupon(couponCode, totalAmount);
             totalAmount = coupon.getFinalAmount();
             order.setCouponCode(couponCode);
@@ -91,7 +96,6 @@ public class OrderService {
             order.setDiscount(coupon.getDiscountAmount());
         }
 
-        // Convert cart items → order items
         List<OrderItemDTO> orderItems = cart.getCartItemDTOs().stream()
                 .map(ci -> objectMapper.convertValue(ci, OrderItemDTO.class))
                 .collect(Collectors.toList());
@@ -109,12 +113,29 @@ public class OrderService {
         order.setAddressId(addressId);
         order.setCreatedAt(Instant.now());
         order.setExpiresAt(Instant.now().plus(24, ChronoUnit.HOURS));
+
         orderRepository.save(order);
+
+        // ✅ Fire async analytics event for PURCHASED
+        List<ProductAnalyticRequest> analyticsEvents = cart.getCartItemDTOs().stream().map(item -> {
+            ProductAnalyticRequest analyticRequest = new ProductAnalyticRequest();
+            analyticRequest.setUsername(username);
+            analyticRequest.setProductId(item.getProductId());
+            analyticRequest.setIdentifier(item.getIdentifier());
+            analyticRequest.setImageUrl(item.getImageUrl());
+            analyticRequest.setEventType(AnalyticsEventType.ORDERED);
+            analyticRequest.setCategories(item.getCategories());
+            return analyticRequest;
+        }).toList();
+
+        if (!analyticsEvents.isEmpty()) {
+            analyticService.recordEvents(analyticsEvents); // <-- async call
+            log.info("Triggered {} async analytics events for purchased items", analyticsEvents.size());
+        }
 
         // Clear cart
         cartRepository.delete(cart);
 
-        // Convert Order → OrderResponseDTO
         return objectMapper.convertValue(order, OrderResponseDTO.class);
     }
 

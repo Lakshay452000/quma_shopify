@@ -9,7 +9,7 @@ import jakarta.validation.constraints.*;
 import java.time.LocalDateTime;
 
 @Document(collection = "reviews")
-@CompoundIndex(name = "user_product_idx", def = "{'userId': 1, 'productId': 1}", unique = true)
+@CompoundIndex(name = "user_product_idx", def = "{'username': 1, 'productId': 1}", unique = true)
 @Getter
 @Setter
 @NoArgsConstructor

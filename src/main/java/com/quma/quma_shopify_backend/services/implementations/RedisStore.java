@@ -1,5 +1,7 @@
 package com.quma.quma_shopify_backend.services.implementations;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quma.quma_shopify_backend.interfaces.IStore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -14,6 +16,9 @@ public class RedisStore implements IStore {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @Override
     public <T> void save(String key, T value, Duration duration) {
         redisTemplate.opsForValue().set(key, value, duration);
@@ -25,11 +30,18 @@ public class RedisStore implements IStore {
     }
 
     public <T> T get(String key, Class<T> clazz) {
-        return clazz.cast(redisTemplate.opsForValue().get(key));
+        Object value = redisTemplate.opsForValue().get(key);
+        return value == null ? null : clazz.cast(value);
+    }
+
+    public <T> T get(String key, TypeReference<T> typeReference) {
+        Object value = redisTemplate.opsForValue().get(key);
+        if (value == null)
+            return null;
+        return objectMapper.convertValue(value, typeReference);
     }
 
     public Long getTimeToExpire(String key, TimeUnit timeUnit) {
-        redisTemplate.getExpire(key, timeUnit);
-        return null;
+        return redisTemplate.getExpire(key, timeUnit);
     }
 }

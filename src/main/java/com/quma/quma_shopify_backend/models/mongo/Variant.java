@@ -1,9 +1,11 @@
 package com.quma.quma_shopify_backend.models.mongo;
 
-import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
+
+import jakarta.validation.constraints.NotBlank;
+
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -11,10 +13,10 @@ import java.util.List;
 public class Variant {
 
     @NotBlank
-    @Field(type = FieldType.Keyword) // Elasticsearch mapping
+    @Field(type = FieldType.Keyword)
     private String identifier;
 
-    @Field(type = FieldType.Keyword) // Elasticsearch mapping
+    @Field(type = FieldType.Keyword)
     private String color;
 
     @Field(type = FieldType.Keyword)

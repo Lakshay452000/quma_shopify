@@ -4,7 +4,7 @@ import java.time.Duration;
 
 public class Constants {
 
-        public static final Duration ACCESS_TOKEN_DURATION = Duration.ofMinutes(3);
+        public static final Duration ACCESS_TOKEN_DURATION = Duration.ofMinutes(15);
         public static final Duration REFRESH_TOKEN_DURATION = Duration.ofDays(7);
         public static final int ACCESS_COOKIE_MAX_AGE = (int) ACCESS_TOKEN_DURATION.getSeconds();
         public static final int REFRESH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60;
