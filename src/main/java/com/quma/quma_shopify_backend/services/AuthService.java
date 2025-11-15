@@ -2,6 +2,7 @@ package com.quma.quma_shopify_backend.services;
 
 import com.quma.quma_shopify_backend.interfaces.IStore;
 import com.quma.quma_shopify_backend.security.JwtUtil;
+import com.quma.quma_shopify_backend.services.implementations.RedisStore;
 import com.quma.quma_shopify_backend.utilities.Constants;
 import com.quma.quma_shopify_backend.utilities.CookieUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,7 +30,7 @@ public class AuthService {
     private JwtUtil jwtUtil;
 
     @Autowired
-    private IStore tokenStore;
+    private RedisStore tokenStore;
 
     private static void setAccessAndRefreshCookie(HttpServletResponse response, String accessToken,
             String refreshToken) {
@@ -86,32 +87,64 @@ public class AuthService {
         tokenStore.save(newToken, username, Constants.REFRESH_TOKEN_DURATION);
     }
 
-    public Map<String, Object> refreshTokenWithExpiry(HttpServletRequest request, HttpServletResponse response) {
+    public Map<String, Object> refreshTokenWithExpiry(
+            HttpServletRequest request,
+            HttpServletResponse response) {
+
         String oldRefreshToken = extractRefreshTokenFromCookie(request);
-        if (oldRefreshToken == null || !jwtUtil.isValid(oldRefreshToken)) {
+
+        // ❌ Missing Redis Validation
+        String storedUsername = tokenStore.get(oldRefreshToken, String.class);
+
+        if (oldRefreshToken == null || storedUsername == null) {
+            return null; // token does not exist in Redis => invalid
+        }
+
+        // JWT signature verification (fast)
+        if (!jwtUtil.isValid(oldRefreshToken)) {
+            tokenStore.delete(oldRefreshToken); // cleanup
             return null;
         }
 
-        String username = getUsernameFromRefreshToken(oldRefreshToken);
-        if (username == null) {
+        // Username match from JWT & Redis (safety)
+        String jwtUsername = getUsernameFromRefreshToken(oldRefreshToken);
+        if (!storedUsername.equals(jwtUsername)) {
+            tokenStore.delete(oldRefreshToken); // tampered => delete
             return null;
         }
 
-        String newAccessToken = jwtUtil.generateToken(username, Constants.ACCESS_TOKEN_DURATION.toMillis());
-        String newRefreshToken = jwtUtil.generateToken(username, Constants.REFRESH_TOKEN_DURATION.toMillis());
+        // Generate new tokens
+        String newAccessToken = jwtUtil.generateToken(jwtUsername, Constants.ACCESS_TOKEN_DURATION.toMillis());
+        String newRefreshToken = jwtUtil.generateToken(jwtUsername, Constants.REFRESH_TOKEN_DURATION.toMillis());
 
-        replaceRefreshToken(oldRefreshToken, newRefreshToken, username); // Save new and delete old
+        // Atomic replace
+        replaceRefreshToken(oldRefreshToken, newRefreshToken, jwtUsername);
+
+        // Set secure cookies
         setAccessAndRefreshCookie(response, newAccessToken, newRefreshToken);
 
         Map<String, Object> result = new HashMap<>();
-        result.put("user", username); // replace with full UserDTO if needed
+        result.put("user", jwtUsername);
         result.put("accessTokenExpiry", System.currentTimeMillis() + Constants.ACCESS_TOKEN_DURATION.toMillis());
         return result;
     }
 
-    public boolean authStatus(HttpServletRequest request) {
+    public Map<String, Object> authStatus(HttpServletRequest request) {
         String token = CookieUtil.getCookieValue(request, Constants.COOKIE_ACCESS_TOKEN_KEY_NAME);
-        return token != null && jwtUtil.isValid(token);
+
+        if (token == null || !jwtUtil.isValid(token)) {
+            return null;
+        }
+
+        String username = jwtUtil.extractUsername(token);
+
+        long expiryMillis = jwtUtil.getExpiration(token).getTime();
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("user", username);
+        response.put("accessTokenExpiry", expiryMillis);
+
+        return response;
     }
 
     public Map<String, Object> getCdnUploadAuthSignature() {
