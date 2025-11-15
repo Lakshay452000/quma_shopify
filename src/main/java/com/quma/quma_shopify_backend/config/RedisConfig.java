@@ -10,8 +10,6 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
-import com.fasterxml.jackson.annotation.JsonAutoDetect;
-import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Configuration
@@ -38,31 +36,29 @@ public class RedisConfig {
         config.setPassword(password);
 
         JedisClientConfiguration clientConfig = JedisClientConfiguration.builder()
-                .useSsl() // enable TLS/SSL
+                .useSsl()
                 .build();
 
         return new JedisConnectionFactory(config, clientConfig);
     }
 
     @Bean
-    public RedisTemplate<String, Object> redisTemplate(JedisConnectionFactory factory) {
+    public RedisTemplate<String, Object> redisTemplate(
+            JedisConnectionFactory factory,
+            ObjectMapper objectMapper) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(factory);
 
-        // ✅ Use plain JSON serializer without @class metadata
+        // Use SAME objectMapper everywhere
         Jackson2JsonRedisSerializer<Object> serializer = new Jackson2JsonRedisSerializer<>(Object.class);
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
-        mapper.deactivateDefaultTyping(); // 👈 disables @class info
-        serializer.setObjectMapper(mapper);
+        serializer.setObjectMapper(objectMapper);
 
         template.setKeySerializer(new StringRedisSerializer());
         template.setHashKeySerializer(new StringRedisSerializer());
         template.setValueSerializer(serializer);
         template.setHashValueSerializer(serializer);
-        template.afterPropertiesSet();
 
+        template.afterPropertiesSet();
         return template;
     }
-
 }

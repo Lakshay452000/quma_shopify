@@ -22,14 +22,12 @@ public class UserContextFilter extends OncePerRequestFilter {
 
         try {
             String username = request.getHeader("X-Client-Username");
-            String ip = request.getHeader("X-Client-IP");
             String mac = request.getHeader("X-Client-MAC");
+            String ip = request.getRemoteAddr();
 
             // Optional defaults
             if (username == null)
                 username = "GUEST";
-            if (ip == null)
-                ip = request.getRemoteAddr();
             if (mac == null)
                 mac = "UNKNOWN";
 

@@ -38,11 +38,11 @@ public class AuthController {
 
     @GetMapping("/status")
     public ResponseEntity<?> authStatus(HttpServletRequest request) {
-        boolean loggedIn = authService.authStatus(request);
-        if (loggedIn) {
-            return ResponseEntity.ok("Authenticated");
+        Map<String, Object> result = authService.authStatus(request);
+        if (result == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        return ResponseEntity.ok(result);
     }
 
     @PostMapping("/send-otp")
