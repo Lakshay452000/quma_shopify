@@ -17,6 +17,8 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 @RequiredArgsConstructor
@@ -25,6 +27,7 @@ public class ProductAnalyticService {
 
     private final RedisStore redisStore;
     private final MongoTemplate mongoTemplate;
+    ExecutorService analyticsExecutor = Executors.newFixedThreadPool(6);
 
     @Async("analyticsExecutor")
     public void recordEvents(List<ProductAnalyticRequest> requests) {
@@ -154,54 +157,66 @@ public class ProductAnalyticService {
                 "mostSearched", "analytics:top:searches",
                 "topRated", "analytics:top:averageRating");
 
-        Map<String, List<Map<String, Object>>> productSections = new LinkedHashMap<>();
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
-
+        // 1️⃣ Section futures
+        Map<String, CompletableFuture<List<Map<String, Object>>>> sectionFutures = new LinkedHashMap<>();
         for (var entry : redisKeys.entrySet()) {
             String section = entry.getKey();
             String redisKey = entry.getValue();
 
-            futures.add(CompletableFuture.runAsync(() -> {
+            CompletableFuture<List<Map<String, Object>>> future = CompletableFuture.supplyAsync(() -> {
                 try {
                     List<Map<String, Object>> redisData = redisStore.get(redisKey, new TypeReference<>() {
                     });
                     if (redisData == null)
                         redisData = Collections.emptyList();
 
-                    // ✅ Filter only required product fields
-                    List<Map<String, Object>> filtered = redisData.stream()
+                    // Only keep required fields
+                    return redisData.stream()
                             .map(item -> Map.of(
                                     "productId", item.get("productId"),
                                     "identifier", item.get("identifier"),
                                     "imageUrl", item.get("imageUrl")))
                             .toList();
-
-                    synchronized (productSections) {
-                        productSections.put(section, filtered);
-                    }
                 } catch (Exception e) {
                     log.error("❌ Error fetching section {} from Redis", section, e);
-                    synchronized (productSections) {
-                        productSections.put(section, Collections.emptyList());
-                    }
+                    return Collections.emptyList();
                 }
-            }));
+            });
+
+            sectionFutures.put(section, future);
         }
 
-        // ✅ Fetch top categories (only name + image)
-        List<Map<String, Object>> topCategoriesRaw = redisStore.get("analytics:top:categories", new TypeReference<>() {
-        });
-        List<Map<String, Object>> topCategories = (topCategoriesRaw == null)
-                ? Collections.emptyList()
-                : topCategoriesRaw.stream()
+        // 2️⃣ Top categories future
+        CompletableFuture<List<Map<String, Object>>> topCategoriesFuture = CompletableFuture.supplyAsync(() -> {
+            try {
+                List<Map<String, Object>> topCategoriesRaw = redisStore.get("analytics:top:categories",
+                        new TypeReference<>() {
+                        });
+                if (topCategoriesRaw == null)
+                    return Collections.emptyList();
+
+                return topCategoriesRaw.stream()
                         .map(cat -> Map.of(
                                 "category", cat.get("_id"),
                                 "imageUrl", cat.get("imageUrl")))
                         .toList();
+            } catch (Exception e) {
+                log.error("❌ Error fetching top categories from Redis", e);
+                return Collections.emptyList();
+            }
+        });
 
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        // 3️⃣ Combine all futures and wait
+        List<CompletableFuture<?>> allFutures = new ArrayList<>(sectionFutures.values());
+        allFutures.add(topCategoriesFuture);
+        CompletableFuture.allOf(allFutures.toArray(new CompletableFuture[0])).join();
 
-        // ✅ Build final response
+        // 4️⃣ Build final response
+        Map<String, List<Map<String, Object>>> productSections = new LinkedHashMap<>();
+        sectionFutures.forEach((key, future) -> productSections.put(key, future.join()));
+
+        List<Map<String, Object>> topCategories = topCategoriesFuture.join();
+
         HomeAnalyticsResponseDTO response = new HomeAnalyticsResponseDTO();
         response.setProductSections(productSections);
         response.setTopCategories(topCategories);
