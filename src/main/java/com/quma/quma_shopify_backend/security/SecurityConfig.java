@@ -19,6 +19,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 
@@ -46,7 +47,7 @@ public class SecurityConfig {
                 config.setAllowedHeaders(Collections.singletonList("*"));
                 config.setAllowCredentials(true);
                 config.setExposedHeaders(Arrays.asList("Set-Cookie"));
-
+                config.setMaxAge(Duration.ofSeconds(3600));
                 UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
                 source.registerCorsConfiguration("/**", config);
                 return source;
