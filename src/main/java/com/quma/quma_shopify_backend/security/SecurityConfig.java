@@ -26,55 +26,59 @@ import java.util.Collections;
 @EnableWebSecurity
 public class SecurityConfig {
 
-    @Autowired
-    private JwtAuthenticationFilter jwtAuthenticationFilter;
+        @Autowired
+        private JwtAuthenticationFilter jwtAuthenticationFilter;
 
-    @Autowired
-    private RateLimitingFilter rateLimitingFilter;
+        @Autowired
+        private RateLimitingFilter rateLimitingFilter;
 
-    @Autowired
-    private UserContextFilter userContextFilter;
+        @Autowired
+        private UserContextFilter userContextFilter;
 
-    @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(Arrays.asList(
-                "https://quma-verse.vercel.app", // fixed production domain
-                "http://localhost:5173" // for local dev
-        ));
-        config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(Collections.singletonList("*"));
-        config.setAllowCredentials(true);
+        @Bean
+        public CorsConfigurationSource corsConfigurationSource() {
+                CorsConfiguration config = new CorsConfiguration();
+                config.setAllowedOrigins(Arrays.asList(
+                                "https://quma-verse.vercel.app", // fixed production domain
+                                "http://localhost:5173" // for local dev
+                ));
+                config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+                config.setAllowedHeaders(Collections.singletonList("*"));
+                config.setAllowCredentials(true);
+                config.setExposedHeaders(Arrays.asList("Set-Cookie"));
 
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
-        return source;
-    }
+                UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+                source.registerCorsConfiguration("/**", config);
+                return source;
+        }
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http.cors() // ✅ this enables CORS for Spring Security
-                .and()
-                .csrf(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/user/login", "/user/register", "/user/reset-password", "/auth/**",
-                                "/products/list", "/products/search/batch",
-                                "/search/**",
-                                "/payment/webhook", "/product-analytics/**", "/health/**")
-                        .permitAll()
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll() // preflight
-                        .anyRequest().authenticated())
-                .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint((request, response, authException) -> {
-                            response.setContentType("application/json");
-                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                            response.getWriter().write("{\"message\":\"Unauthorized\"}");
-                        }))
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(rateLimitingFilter, JwtAuthenticationFilter.class)
-                .addFilterBefore(userContextFilter, RateLimitingFilter.class);
+        @Bean
+        public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+                http.cors() // ✅ this enables CORS for Spring Security
+                                .and()
+                                .csrf(AbstractHttpConfigurer::disable)
+                                .authorizeHttpRequests(auth -> auth
+                                                .requestMatchers("/user/login", "/user/register",
+                                                                "/user/reset-password", "/auth/**",
+                                                                "/products/list", "/products/search/batch",
+                                                                "/search/**",
+                                                                "/payment/webhook", "/product-analytics/**",
+                                                                "/health/**")
+                                                .permitAll()
+                                                .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll() // preflight
+                                                .anyRequest().authenticated())
+                                .exceptionHandling(ex -> ex
+                                                .authenticationEntryPoint((request, response, authException) -> {
+                                                        response.setContentType("application/json");
+                                                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                                                        response.getWriter().write("{\"message\":\"Unauthorized\"}");
+                                                }))
+                                .sessionManagement(session -> session
+                                                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                                .addFilterBefore(rateLimitingFilter, JwtAuthenticationFilter.class)
+                                .addFilterBefore(userContextFilter, RateLimitingFilter.class);
 
-        return http.build();
-    }
+                return http.build();
+        }
 }
