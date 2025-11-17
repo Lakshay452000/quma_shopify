@@ -13,7 +13,6 @@ public class CookieUtil {
                 .sameSite("None") // required for cross-origin cookies
                 .path(path)
                 .maxAge(maxAge)
-                .domain("quma-verse.vercel.app")
                 .build();
 
         response.addHeader("Set-Cookie", cookie.toString());
