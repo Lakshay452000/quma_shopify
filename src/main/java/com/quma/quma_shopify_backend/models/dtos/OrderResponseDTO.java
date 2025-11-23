@@ -22,4 +22,6 @@ public class OrderResponseDTO {
     private BigDecimal discount;
     private BigDecimal shippingFee;
     private ShippingAddressDTO shippingAddress;
+    private Instant paymentStatusUpdatedAt;
+
 }
