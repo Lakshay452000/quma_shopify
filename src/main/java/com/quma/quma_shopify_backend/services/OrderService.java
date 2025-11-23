@@ -6,11 +6,14 @@ import com.quma.quma_shopify_backend.enums.OrderPaymentStatus;
 import com.quma.quma_shopify_backend.enums.OrderShipmentStatus;
 import com.quma.quma_shopify_backend.enums.OrderStatus;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
+import com.quma.quma_shopify_backend.models.dtos.CartItemDTO;
 import com.quma.quma_shopify_backend.models.dtos.CouponApplyResponseDTO;
 import com.quma.quma_shopify_backend.models.dtos.CreateOrderRequestDTO;
 import com.quma.quma_shopify_backend.models.dtos.OrderResponseDTO;
 import com.quma.quma_shopify_backend.models.dtos.PagedOrderResponseDTO;
 import com.quma.quma_shopify_backend.models.dtos.ProductAnalyticRequest;
+import com.quma.quma_shopify_backend.models.dtos.ShippingAddressDTO;
+import com.quma.quma_shopify_backend.models.mongo.Address;
 import com.quma.quma_shopify_backend.models.mongo.CartItemMongoDTO;
 import com.quma.quma_shopify_backend.models.mongo.Order;
 import com.quma.quma_shopify_backend.models.mongo.OrderItemDTO;
@@ -30,12 +33,19 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+
+import com.quma.quma_shopify_backend.models.mongo.Product;
 
 @Service
 @RequiredArgsConstructor
@@ -56,14 +66,19 @@ public class OrderService {
 
     private final ProductAnalyticService analyticService;
 
+    private final MongoTemplate mongoTemplate;
+
+    private final ProductStockService productStockService;
+
     /**
      * Create an order for the current user from their cart.
      */
     @Transactional
-    public OrderResponseDTO createOrder(CreateOrderRequestDTO createOrderRequestDTO) {
+    public Order createOrder(CreateOrderRequestDTO createOrderRequestDTO) {
         String couponCode = createOrderRequestDTO.getCouponCode();
         String addressId = createOrderRequestDTO.getAddressId();
         String username = UserContext.get().getUsername();
+
         if (username == null || username.isEmpty()) {
             throw new ApiException("Unauthenticated user", 401);
         }
@@ -81,30 +96,48 @@ public class OrderService {
             throw new ApiException("Invalid shipping address", 400);
         }
 
-        Order order = new Order();
+        // -------------------------------
+        // 1) ATOMIC STOCK VALIDATION + REDUCTION
+        // -------------------------------
+        for (CartItemDTO ci : cart.getCartItemDTOs()) {
+            productStockService.reduceStock(ci.getProductId(), ci.getIdentifier(), ci.getQuantity());
+        }
 
-        // Recalculate total amount from cart items
+        // -------------------------------
+        // 2) CALCULATE ORDER AMOUNT
+        // -------------------------------
         BigDecimal totalAmount = cart.getCartItemDTOs().stream()
                 .map(ci -> ci.getPrice().multiply(BigDecimal.valueOf(ci.getQuantity())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        Order order = new Order();
+
+        order.setSubTotal(totalAmount);
+        order.setDiscount(BigDecimal.ZERO);
+        order.setAmount(totalAmount);
+
         if (couponCode != null && !couponCode.isEmpty()) {
             CouponApplyResponseDTO coupon = couponService.applyCoupon(couponCode, totalAmount);
-            totalAmount = coupon.getFinalAmount();
             order.setCouponCode(couponCode);
             order.setSubTotal(coupon.getOriginalAmount());
             order.setDiscount(coupon.getDiscountAmount());
+            totalAmount = coupon.getFinalAmount();
+            order.setAmount(totalAmount);
         }
 
+        // -------------------------------
+        // 3) COPY CART ITEMS INTO ORDER
+        // -------------------------------
         List<OrderItemDTO> orderItems = cart.getCartItemDTOs().stream()
                 .map(ci -> objectMapper.convertValue(ci, OrderItemDTO.class))
                 .collect(Collectors.toList());
 
-        // Create Order
+        // -------------------------------
+        // 4) CREATE ORDER
+        // -------------------------------
         order.setOrderId("ORD-" + UtilityFunctions.getRandomId());
         order.setUsername(username);
         order.setItems(orderItems);
-        order.setAmount(totalAmount);
         order.setCurrency("INR");
         order.setShippingFee(shippingService.calculateShipping("Shiprocket", "ADDR-123"));
         order.setOrderPaymentStatus(OrderPaymentStatus.PENDING);
@@ -116,27 +149,30 @@ public class OrderService {
 
         orderRepository.save(order);
 
-        // ✅ Fire async analytics event for PURCHASED
+        // -------------------------------
+        // 5) ANALYTICS (ASYNC)
+        // -------------------------------
         List<ProductAnalyticRequest> analyticsEvents = cart.getCartItemDTOs().stream().map(item -> {
-            ProductAnalyticRequest analyticRequest = new ProductAnalyticRequest();
-            analyticRequest.setUsername(username);
-            analyticRequest.setProductId(item.getProductId());
-            analyticRequest.setIdentifier(item.getIdentifier());
-            analyticRequest.setImageUrl(item.getImageUrl());
-            analyticRequest.setEventType(AnalyticsEventType.ORDERED);
-            analyticRequest.setCategories(item.getCategories());
-            return analyticRequest;
+            ProductAnalyticRequest ar = new ProductAnalyticRequest();
+            ar.setUsername(username);
+            ar.setProductId(item.getProductId());
+            ar.setIdentifier(item.getIdentifier());
+            ar.setImageUrl(item.getImageUrl());
+            ar.setEventType(AnalyticsEventType.ORDERED);
+            ar.setCategories(item.getCategories());
+            return ar;
         }).toList();
 
         if (!analyticsEvents.isEmpty()) {
-            analyticService.recordEvents(analyticsEvents); // <-- async call
-            log.info("Triggered {} async analytics events for purchased items", analyticsEvents.size());
+            analyticService.recordEvents(analyticsEvents);
         }
 
-        // Clear cart
+        // -------------------------------
+        // 6) CLEAR CART
+        // -------------------------------
         cartRepository.delete(cart);
 
-        return objectMapper.convertValue(order, OrderResponseDTO.class);
+        return order;
     }
 
     public OrderResponseDTO getOrderById(String orderId) {
@@ -149,8 +185,16 @@ public class OrderService {
         if (order == null) {
             throw new ApiException("Order not found", 404);
         }
+        Address address = addressRepository.findByAddressId(order.getAddressId());
+        if (address == null) {
+            throw new ApiException("Shipping address not found", 404);
+        }
 
-        return objectMapper.convertValue(order, OrderResponseDTO.class);
+        ShippingAddressDTO shippingAddress = objectMapper.convertValue(address, ShippingAddressDTO.class);
+
+        OrderResponseDTO orderResponseDTO = objectMapper.convertValue(order, OrderResponseDTO.class);
+        orderResponseDTO.setShippingAddress(shippingAddress);
+        return orderResponseDTO;
     }
 
     public PagedOrderResponseDTO getAllOrders(int page, int size, OrderStatus status) {

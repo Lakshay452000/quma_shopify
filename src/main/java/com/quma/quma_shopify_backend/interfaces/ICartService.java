@@ -15,5 +15,5 @@ public interface ICartService {
 
     CartResponseDTO bulkUpdate(List<CartItemRequestDTO> items);
 
-    boolean checkout(CartCheckoutRequestDTO request);
+    CartResponseDTO checkout();
 }

@@ -6,5 +6,5 @@ import lombok.Data;
 
 @Data
 public class CartCheckoutRequestDTO {
-    private List<CartItemDTO> items;
+    private List<CartItemRequestDTO> items;
 }

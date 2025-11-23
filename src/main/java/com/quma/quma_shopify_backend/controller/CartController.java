@@ -49,12 +49,9 @@ public class CartController {
 
     // Checkout (temporary reservation)
     @PostMapping("/checkout")
-    public ResponseEntity<String> checkout(@RequestBody CartCheckoutRequestDTO request) {
-        boolean success = cartService.checkout(request);
-        if (success) {
-            return ResponseEntity.ok("Order placed, payment pending. Cart reserved for 10 mins.");
-        } else {
-            return ResponseEntity.badRequest().body("Some items are out of stock. Please adjust cart.");
-        }
+    public ResponseEntity<CartResponseDTO> checkout() {
+        CartResponseDTO response = cartService.checkout();
+        return ResponseEntity.ok(response);
     }
+
 }

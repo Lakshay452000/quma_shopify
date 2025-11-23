@@ -16,11 +16,12 @@ public class OrderController {
     @Autowired
     private OrderService orderService;
 
-    @PostMapping("/create-order")
-    public ResponseEntity<OrderResponseDTO> createOrder(@RequestBody CreateOrderRequestDTO createOrderRequestDTO)
-            throws Exception {
-        return ResponseEntity.ok(orderService.createOrder(createOrderRequestDTO));
-    }
+    // @PostMapping("/create-order")
+    // public ResponseEntity<OrderResponseDTO> createOrder(@RequestBody
+    // CreateOrderRequestDTO createOrderRequestDTO)
+    // throws Exception {
+    // return ResponseEntity.ok(orderService.createOrder(createOrderRequestDTO));
+    // }
 
     @GetMapping("/{orderId}")
     public ResponseEntity<OrderResponseDTO> getOrderById(@PathVariable String orderId) throws Exception {

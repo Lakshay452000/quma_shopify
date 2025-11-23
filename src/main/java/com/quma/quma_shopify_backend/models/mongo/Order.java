@@ -50,4 +50,6 @@ public class Order {
     private Instant updatedAt;
 
     private Instant expiresAt;
+
+    private Instant paymentStatusUpdatedAt;
 }

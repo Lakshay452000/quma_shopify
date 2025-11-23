@@ -27,7 +27,7 @@ public class ReviewController {
         return ResponseEntity.ok(review);
     }
 
-    @GetMapping("/{productId}/reviews")
+    @GetMapping("/{productId}")
     public ResponseEntity<Page<ReviewResponseDTO>> getReviews(
             @PathVariable String productId,
             @RequestParam(defaultValue = "0") int page,

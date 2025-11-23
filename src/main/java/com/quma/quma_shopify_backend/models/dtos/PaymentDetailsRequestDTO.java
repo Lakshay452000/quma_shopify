@@ -5,8 +5,8 @@ import lombok.Data;
 
 @Data
 @AllArgsConstructor
-public class VerifyPaymentDTO {
-    private String orderId; // internal order id
+public class PaymentDetailsRequestDTO {
+    private String orderId;
     private String razorpayOrderId;
     private String paymentId;
     private String signature;

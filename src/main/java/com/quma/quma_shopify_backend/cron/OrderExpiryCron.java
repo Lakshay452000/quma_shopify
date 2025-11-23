@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class OrderExpiryScheduler {
+public class OrderExpiryCron {
 
     private final OrderRepository orderRepository;
 
@@ -20,7 +20,7 @@ public class OrderExpiryScheduler {
         orderRepository.expireOrders();
     }
 
-    @Scheduled(fixedRate = 1000 * 60 * 7)
+    @Scheduled(fixedRate = 1000 * 60 * 3)
     public void resetProcessingOrders() {
         orderRepository.resetProcessingOrders();
     }

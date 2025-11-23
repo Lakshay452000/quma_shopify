@@ -21,5 +21,5 @@ public class OrderResponseDTO {
     private BigDecimal subTotal;
     private BigDecimal discount;
     private BigDecimal shippingFee;
-
+    private ShippingAddressDTO shippingAddress;
 }

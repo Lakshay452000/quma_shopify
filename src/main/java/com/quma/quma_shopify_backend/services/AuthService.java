@@ -1,6 +1,5 @@
 package com.quma.quma_shopify_backend.services;
 
-import com.quma.quma_shopify_backend.interfaces.IStore;
 import com.quma.quma_shopify_backend.security.JwtUtil;
 import com.quma.quma_shopify_backend.services.implementations.RedisStore;
 import com.quma.quma_shopify_backend.utilities.Constants;
@@ -97,6 +96,7 @@ public class AuthService {
         String storedUsername = tokenStore.get(oldRefreshToken, String.class);
 
         if (oldRefreshToken == null || storedUsername == null) {
+            tokenStore.delete(oldRefreshToken); // cleanup
             return null; // token does not exist in Redis => invalid
         }
 

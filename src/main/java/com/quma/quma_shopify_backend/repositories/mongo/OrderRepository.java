@@ -23,6 +23,8 @@ public interface OrderRepository extends MongoRepository<Order, String>, OrderRe
 
     Optional<Order> findByOrderId(String orderId);
 
+    Optional<Order> findByOrderIdAndOrderPaymentStatus(String orderId, OrderPaymentStatus orderPaymentStatus);
+
     Page<Order> findByUsername(String username, Pageable pageable);
 
     Page<Order> findByUsernameAndOrderStatus(String username, OrderStatus orderStatus, Pageable pageable);

@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.quma.quma_shopify_backend.models.dtos.InitiatePaymentResponseDTO;
+import com.quma.quma_shopify_backend.models.dtos.PaymentDetailsRequestDTO;
+import com.quma.quma_shopify_backend.models.dtos.PaymentRequestDTO;
 import com.quma.quma_shopify_backend.services.PaymentService;
 
 @RestController
@@ -22,17 +24,19 @@ public class PaymentController {
     @Autowired
     private PaymentService paymentService;
 
-    @PostMapping("/start/{orderId}")
-    public ResponseEntity<InitiatePaymentResponseDTO> startPayment(@PathVariable String orderId) {
-        return ResponseEntity.ok(paymentService.startPayment(orderId));
+    @PostMapping("/start")
+    public ResponseEntity<InitiatePaymentResponseDTO> startPayment(@RequestBody PaymentRequestDTO paymentRequestDTO)
+            throws Exception {
+        return ResponseEntity.ok(paymentService.startPayment(paymentRequestDTO));
     }
 
-    // @PostMapping("/verify")
-    // public ResponseEntity<Map<String, String>> verifyPayment(@RequestBody
-    // VerifyPaymentDTO verifyPaymentDTO)
-    // throws Exception {
-    // return ResponseEntity.ok(paymentService.verifyPayment(verifyPaymentDTO));
-    // }
+    @PostMapping("/save-details")
+    public ResponseEntity<Void> savePaymentDetails(
+            @RequestBody PaymentDetailsRequestDTO paymentDetailsRequestDTO)
+            throws Exception {
+        paymentService.savePaymentDetails(paymentDetailsRequestDTO);
+        return ResponseEntity.noContent().build();
+    }
 
     @PostMapping("/webhook")
     public ResponseEntity<String> webhookPayment(@RequestBody String payload,
@@ -41,7 +45,7 @@ public class PaymentController {
     }
 
     @GetMapping("/status/{orderId}")
-    public ResponseEntity<Map<String, String>> checkOrderPaymentStatus(@PathVariable String orderId) {
+    public ResponseEntity<Map<String, Object>> checkOrderPaymentStatus(@PathVariable String orderId) {
         return ResponseEntity.ok(paymentService.checkOrderPaymentStatus(orderId));
     }
 }

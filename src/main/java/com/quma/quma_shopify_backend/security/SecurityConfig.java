@@ -64,8 +64,9 @@ public class SecurityConfig {
                                                                 "/products/list", "/products/search/batch",
                                                                 "/search/**",
                                                                 "/payment/webhook", "/product-analytics/**",
-                                                                "/health/**")
+                                                                "/health/**", "/reviews/*/")
                                                 .permitAll()
+                                                .requestMatchers(HttpMethod.GET, "/reviews/**").permitAll()
                                                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll() // preflight
                                                 .anyRequest().authenticated())
                                 .exceptionHandling(ex -> ex

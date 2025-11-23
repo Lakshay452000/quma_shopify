@@ -1,18 +1,28 @@
 package com.quma.quma_shopify_backend.services;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang3.StringUtils;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 
 import com.quma.quma_shopify_backend.enums.OrderPaymentStatus;
 import com.quma.quma_shopify_backend.exceptions.ApiException;
+import com.quma.quma_shopify_backend.models.dtos.CreateOrderRequestDTO;
 import com.quma.quma_shopify_backend.models.dtos.InitiatePaymentResponseDTO;
+import com.quma.quma_shopify_backend.models.dtos.PaymentDetailsRequestDTO;
+import com.quma.quma_shopify_backend.models.dtos.PaymentRequestDTO;
 import com.quma.quma_shopify_backend.models.mongo.Order;
 import com.quma.quma_shopify_backend.repositories.mongo.OrderRepository;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.data.mongodb.core.query.Criteria;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -24,64 +34,104 @@ public class PaymentService {
     OrderRepository orderRepository;
 
     @Autowired
+    OrderService orderService;
+
+    @Autowired
     RazorpayService razorpayService;
+
+    @Autowired
+    MongoTemplate mongoTemplate;
 
     @Value("${razorpay.key_id}")
     private String keyId;
 
-    public InitiatePaymentResponseDTO startPayment(String orderId) {
+    public InitiatePaymentResponseDTO startPayment(PaymentRequestDTO dto) {
+
         try {
-            Order entity = orderRepository.findByOrderId(orderId)
-                    .orElseThrow(() -> new ApiException("Order not found", 404));
 
-            String receipt = entity.getOrderId();
+            Order order;
 
-            com.razorpay.Order razorpayOrder = razorpayService.createOrder(entity.getAmount().longValue(), receipt);
+            boolean isNewOrder = StringUtils.isBlank(dto.getOrderId());
 
-            entity.setRazorpayOrderId(razorpayOrder.get("id"));
-            entity.setReceipt(receipt);
-            orderRepository.save(entity);
+            if (isNewOrder) {
+                // Must have addressId to create a new order
+                if (StringUtils.isBlank(dto.getAddressId())) {
+                    throw new ApiException("Address ID is required for new order", 400);
+                }
 
-            // create DTO to return
-            InitiatePaymentResponseDTO response = new InitiatePaymentResponseDTO();
-            response.setKey(keyId);
-            response.setOrderId(entity.getId());
-            response.setRazorpayOrderId(razorpayOrder.get("id"));
-            Number amountNumber = razorpayOrder.get("amount");
-            response.setAmount(amountNumber.longValue() / 100);
-            response.setCurrency(razorpayOrder.get("currency"));
-            response.setReceipt(razorpayOrder.get("receipt"));
-            response.setStatus(razorpayOrder.get("status"));
+                order = orderService.createOrder(
+                        new CreateOrderRequestDTO(dto.getCouponCode(), dto.getAddressId()));
 
-            return response;
+            } else {
+                order = orderRepository.findByOrderId(dto.getOrderId())
+                        .orElseThrow(() -> new ApiException("Order not found", 404));
+                if (!List.of(OrderPaymentStatus.PENDING, OrderPaymentStatus.CANCELLED, OrderPaymentStatus.FAILED)
+                        .contains(order.getOrderPaymentStatus())
+                        || order.getExpiresAt().isBefore(Instant.now())) {
+
+                    throw new ApiException("Order is not in a payable state", 400);
+                }
+
+            }
+
+            // Razorpay Order
+            String receipt = order.getOrderId();
+
+            com.razorpay.Order rpOrder = razorpayService.createOrder(
+                    order.getAmount().longValue(),
+                    receipt);
+
+            // Save razorpay order details
+            order.setRazorpayOrderId(rpOrder.get("id"));
+            order.setReceipt(receipt);
+            order.setOrderPaymentStatus(OrderPaymentStatus.PROCESSING);
+            order.setPaymentStatusUpdatedAt(Instant.now());
+            orderRepository.save(order);
+
+            return buildResponse(order, rpOrder);
+
         } catch (Exception e) {
-            log.error("Error while starting payment", e.getMessage());
-            throw new ApiException(e.getMessage(), 500);
+            log.error("Error while starting payment: {}", e.getMessage());
+            throw new ApiException("Failed to start payment", 500);
         }
     }
 
-    // public Map<String, String> verifyPayment(VerifyPaymentDTO payload) throws
-    // Exception {
+    private InitiatePaymentResponseDTO buildResponse(Order order, com.razorpay.Order rpOrder) {
+        InitiatePaymentResponseDTO res = new InitiatePaymentResponseDTO();
+        res.setKey(keyId);
+        res.setOrderId(order.getOrderId());
+        res.setRazorpayOrderId(rpOrder.get("id"));
+        res.setCurrency(rpOrder.get("currency"));
+        res.setReceipt(rpOrder.get("receipt"));
+        res.setStatus(rpOrder.get("status"));
 
-    // Order order = orderRepository.findByOrderId(payload.getOrderId());
-    // if (order == null)
-    // new ApiException("Order not found", 404);
-    // boolean valid = razorpayService.verifySignature(
-    // payload.getRazorpayOrderId(),
-    // payload.getPaymentId(),
-    // payload.getSignature());
-    // if (valid) {
-    // order.setPaymentId(payload.getPaymentId());
-    // order.setSignature(payload.getSignature());
-    // order.setOrderPaymentStatus(OrderPaymentStatus.PAID)
-    // orderRepository.save(order);
-    // return Map.of("status", "success");
-    // } else {
-    // order.setStatus("FAILED");
-    // orderRepository.save(order);
-    // return Map.of("status", "invalid_signature");
-    // }
-    // }
+        Number amountNumber = rpOrder.get("amount");
+        res.setAmount(amountNumber.longValue() / 100);
+
+        return res;
+    }
+
+    public void savePaymentDetails(PaymentDetailsRequestDTO payload) {
+
+        if (payload == null || StringUtils.isBlank(payload.getPaymentId())) {
+            return;
+        }
+        Query query = new Query();
+        query.addCriteria(Criteria.where("orderId").is(payload.getOrderId()));
+        query.addCriteria(Criteria.where("orderPaymentStatus").is(OrderPaymentStatus.PROCESSING));
+
+        Update update = new Update()
+                .set("paymentId", payload.getPaymentId())
+                .set("signature", payload.getSignature())
+                .set("paymentStatusUpdatedAt", Instant.now());
+
+        // Only updates if order is still PROCESSING
+        mongoTemplate.findAndModify(
+                query,
+                update,
+                Order.class);
+
+    }
 
     public String webhookPayment(String payload, String signature) {
         try {
@@ -92,62 +142,69 @@ public class PaymentService {
                 throw new ApiException("Invalid signature", 500);
             }
 
-            // Parse event
             JSONObject json = new JSONObject(payload);
             String event = json.getString("event");
 
+            // Extract base payment info
+            JSONObject payment = json.getJSONObject("payload")
+                    .getJSONObject("payment")
+                    .getJSONObject("entity");
+
+            String razorpayPaymentId = payment.getString("id");
+            String razorpayOrderId = payment.getString("order_id");
+            BigDecimal amount = payment.getBigDecimal("amount");
+            String receipt = razorpayService.getReceiptFromRazorpayId(razorpayOrderId);
+
             if ("payment.captured".equals(event)) {
-                JSONObject payment = json.getJSONObject("payload")
-                        .getJSONObject("payment")
-                        .getJSONObject("entity");
 
-                String razorpayPaymentId = payment.getString("id");
-                String razorpayOrderId = payment.getString("order_id");
-                BigDecimal amount = payment.getBigDecimal("amount");
-                String receipt = razorpayService.getReceiptFromRazorpayId(razorpayOrderId);
+                // ATOMIC: Update only if current status is PROCESSING
+                Query query = new Query()
+                        .addCriteria(Criteria.where("orderId").is(receipt))
+                        .addCriteria(Criteria.where("orderPaymentStatus").ne(OrderPaymentStatus.PAID));
 
-                // Find order by receipt (orderId)
-                Order order = orderRepository.findByOrderId(receipt)
-                        .orElseThrow(() -> new ApiException("Order not found", 404));
-                if (order == null) {
-                    log.warn("Order not found for receipt {}", receipt);
-                    return "Order not found";
-                }
+                Update update = new Update()
+                        .set("orderPaymentStatus", OrderPaymentStatus.PAID)
+                        .set("paymentId", razorpayPaymentId)
+                        .set("razorpayOrderId", razorpayOrderId)
+                        .set("paymentStatusUpdatedAt", Instant.now());
 
-                if (OrderPaymentStatus.PAID.equals(order.getOrderPaymentStatus())) {
-                    // Duplicate payment → refund
-                    try {
+                Order updatedOrder = mongoTemplate.findAndModify(query, update, Order.class);
+
+                if (updatedOrder == null) {
+                    // Status is NOT PROCESSING — check what happened
+                    Order existing = orderRepository.findByOrderId(receipt)
+                            .orElse(null);
+
+                    if (existing != null && existing.getOrderPaymentStatus() == OrderPaymentStatus.PAID) {
+                        // Already paid earlier → refund duplicate
                         razorpayService.refundPayment(razorpayPaymentId, amount.longValue());
-                        log.warn("Duplicate payment detected for order {}, refund initiated", receipt);
-                        return "Duplicate payment refunded";
-                    } catch (Exception e) {
-                        log.error("Error initiating refund for duplicate payment: {}", e.getMessage());
-                        return "Duplicate payment refund failed";
+                        log.warn("Duplicate payment refunded for {}", receipt);
+                        return "Duplicate refunded";
                     }
+
+                    log.warn("Webhook received but order not in PROCESSING state: {}", receipt);
+                    return "Ignored – not in PROCESSING state";
                 }
 
-                order.setOrderPaymentStatus(OrderPaymentStatus.PAID);
-                order.setPaymentId(razorpayPaymentId);
-                order.setRazorpayOrderId(razorpayOrderId);
-                order.setAmount(amount);
-                orderRepository.save(order);
+                log.info("Atomic update: Payment captured for {}", receipt);
+                return "Payment captured";
 
-                log.info("Payment captured for order {}", receipt);
+            }
 
-            } else if ("payment.failed".equals(event)) {
-                JSONObject payment = json.getJSONObject("payload")
-                        .getJSONObject("payment")
-                        .getJSONObject("entity");
+            else if ("payment.failed".equals(event)) {
 
-                String razorpayOrderId = payment.getString("order_id");
-                String receipt = razorpayService.getReceiptFromRazorpayId(razorpayOrderId);
+                Query query = new Query()
+                        .addCriteria(Criteria.where("orderId").is(receipt))
+                        .addCriteria(Criteria.where("orderPaymentStatus").is(OrderPaymentStatus.PROCESSING));
 
-                Order order = orderRepository.findById(receipt).orElse(null);
-                if (order != null) {
-                    order.setOrderPaymentStatus(OrderPaymentStatus.FAILED);
-                    orderRepository.save(order);
-                }
-                log.info("Payment failed for order {}", receipt);
+                Update update = new Update()
+                        .set("orderPaymentStatus", OrderPaymentStatus.FAILED)
+                        .set("paymentStatusUpdatedAt", Instant.now());
+
+                mongoTemplate.findAndModify(query, update, Order.class);
+
+                log.info("Atomic update: Payment failed for {}", receipt);
+                return "Payment failed";
             }
 
             return "Webhook processed";
@@ -158,11 +215,12 @@ public class PaymentService {
         }
     }
 
-    public Map<String, String> checkOrderPaymentStatus(String orderId) {
-        Order order = orderRepository.findById(orderId).orElse(null);
+    public Map<String, Object> checkOrderPaymentStatus(String orderId) {
+        Order order = orderRepository.findByOrderId(orderId).orElse(null);
         if (order == null) {
             throw new ApiException("Order not found", 404);
         }
-        return Map.of("status", order.getOrderPaymentStatus().toString());
+        return Map.of("status", order.getOrderPaymentStatus().toString(),
+                "paymentTime", order.getPaymentStatusUpdatedAt());
     }
 }

@@ -31,7 +31,7 @@ public class ShippingService {
         // .orElseThrow(() -> new RuntimeException("Address not found"));
 
         double weight = cart.getCartItemDTOs().stream()
-                .mapToDouble(i -> i.getWeight() * i.getQuantity())
+                .mapToDouble(i -> (i.getWeight() == null ? 1 : i.getWeight()) * i.getQuantity())
                 .sum();
         // String pincode = address.getPincode();
         String pincode = "560001"; // TODO: Replace with actual pincode from address
