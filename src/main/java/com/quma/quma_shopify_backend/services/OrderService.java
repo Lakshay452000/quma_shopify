@@ -125,6 +125,9 @@ public class OrderService {
             order.setAmount(totalAmount);
         }
 
+        order.setShippingFee(shippingService.calculateShipping("Shiprocket", "ADDR-123"));
+        BigDecimal totalAmountAfterShipping = order.getAmount().add(order.getShippingFee());
+        order.setAmount(totalAmountAfterShipping);
         // -------------------------------
         // 3) COPY CART ITEMS INTO ORDER
         // -------------------------------
@@ -139,7 +142,6 @@ public class OrderService {
         order.setUsername(username);
         order.setItems(orderItems);
         order.setCurrency("INR");
-        order.setShippingFee(shippingService.calculateShipping("Shiprocket", "ADDR-123"));
         order.setOrderPaymentStatus(OrderPaymentStatus.PENDING);
         order.setOrderShipmentStatus(OrderShipmentStatus.PENDING);
         order.setOrderStatus(OrderStatus.ACTIVE);

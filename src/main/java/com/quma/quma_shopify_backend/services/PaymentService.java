@@ -78,7 +78,7 @@ public class PaymentService {
             String receipt = order.getOrderId();
 
             com.razorpay.Order rpOrder = razorpayService.createOrder(
-                    order.getAmount().longValue(),
+                    order.getAmount(),
                     receipt);
 
             // Save razorpay order details

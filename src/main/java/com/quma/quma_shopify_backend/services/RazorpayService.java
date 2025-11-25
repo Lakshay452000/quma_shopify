@@ -1,5 +1,7 @@
 package com.quma.quma_shopify_backend.services;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -43,8 +45,11 @@ public class RazorpayService {
     // -----------------------------
     // CREATE ORDER
     // -----------------------------
-    public Order createOrder(long amountInRupees, String receipt) throws Exception {
-        long amountInPaise = amountInRupees * 100;
+    public Order createOrder(BigDecimal amountInRupees, String receipt) throws Exception {
+        long amountInPaise = amountInRupees
+                .movePointRight(2) // multiply by 100 exactly
+                .setScale(0, RoundingMode.DOWN) // drop any extra digits
+                .longValue();
 
         JSONObject req = new JSONObject();
         req.put("amount", amountInPaise);
